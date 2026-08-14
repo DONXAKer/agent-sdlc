@@ -36,10 +36,10 @@
 
 | Путь | Что делаем | Почему добавлен сверх разведки |
 |---|---|---|
-| `src/main/java/com/acme/payments/service/PaymentService.java` | обёртка вокруг guard'а, снять `@Transactional` | был в Affected Areas |
-| `src/main/java/com/acme/payments/web/PaymentController.java` | заголовок + выбор кода ответа по `isReplay()` | был в Affected Areas |
-| `src/main/java/com/acme/payments/schedule/PaymentRetryScheduler.java` | обновить вызов под новую сигнатуру | был в Affected Areas |
-| `src/test/java/com/acme/payments/PaymentIdempotencyIT.java` | 9 интеграционных тестов | был в Affected Areas |
+| `src/main/java/com/acme/payments/service/PaymentService.java` | обёртка вокруг guard'а, снять `@Transactional` | был в задаче |
+| `src/main/java/com/acme/payments/web/PaymentController.java` | заголовок + выбор кода ответа по `isReplay()` | был в задаче |
+| `src/main/java/com/acme/payments/schedule/PaymentRetryScheduler.java` | обновить вызов под новую сигнатуру | был в задаче |
+| `src/test/java/com/acme/payments/PaymentIdempotencyIT.java` | 9 интеграционных тестов | был в задаче |
 
 **Из задачи исключено:** н/п
 

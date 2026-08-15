@@ -35,8 +35,10 @@ echo "run dir: $RUN · slug: $SLUG · resume: $RESUME"
 # --- рабочая копия fixture + git (пропускается при RESUME) --------------------------------------
 if [ "$RESUME" != "1" ]; then
   cp -R "$REPO/test/fixture/." "$RUN/"
-  # кэш-мусор из рабочей копии fixture (после make test) не тащим в baseline-коммит
-  find "$RUN" \( -name __pycache__ -type d \) -prune -exec rm -rf {} + 2>/dev/null || true
+  # чистая рабочая копия: кэш от make test (git и так игнорирует, но пусть не мозолит diff'ы)
+  # и Finder-мусор — .DS_Store fixture/.gitignore НЕ кроет и он попал бы в baseline-коммит
+  find "$RUN" \( -name __pycache__ -type d -prune -exec rm -rf {} + \) \
+       -o -name .DS_Store -delete 2>/dev/null || true
   cp "$TASK_FILE" "$RUN/TASK.md"
   cp "$ANSWERS_FILE" "$RUN/ANSWERS.md"
   mkdir -p "$RUN/.claude"
@@ -117,16 +119,22 @@ main_flow() {
           echo "бюджет попыток ($b) исчерпан (action=$act) — handoff оформит обрыв"
           break
         fi
-        local k=$((n + 1)) before after ch n2
+        local k=$((n + 1)) before after ch0 ch n2
+        # before снимается ДО chunk-стадии: окно шире (экзотика «chunk сам написал отчёт»
+        # засчитается verify), но зато «verify ничего не оставил» ловится всегда; чужой
+        # отчёт от chunk'а — нарушение другого рода, его ловит рецензент и scope-гейт
         before=$(reports_count)
+        ch0=$(pv chunk) || { ABORTED="pv-сбой"; return 1; }
         stage "5-chunk-attempt-$k"  "/sdlc-chunk $SLUG" || return 1
+        ch=$(pv chunk) || { ABORTED="pv-сбой"; return 1; }
         n2=$(pv attempts) || { ABORTED="pv-сбой"; return 1; }
-        if [ "$n2" -le "$n" ]; then
+        # прогресс = новая строка в ТОМ ЖЕ журнале, либо chunk легитимно открыл следующий
+        # журнал (мультичанковый план) — сравнение пары (chunk, attempts), не голых счётчиков
+        if [ "$ch" = "$ch0" ] && [ "$n2" -le "$n" ]; then
           echo "chunk отработал, но строка попытки в журнале не прибавилась ($n → $n2) — останов"
           ABORTED="chunk-без-строки-попытки"
           return 1
         fi
-        ch=$(pv chunk) || { ABORTED="pv-сбой"; return 1; }
         stage "6-verify-attempt-$k" "/sdlc-verify $SLUG $ch" || return 1
         after=$(reports_count)
         if [ "$after" -le "$before" ]; then

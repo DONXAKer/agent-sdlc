@@ -9,9 +9,9 @@
   python3 flow-verdict.py [--at verify|handoff] <корень проекта> <slug>
     --at handoff (умолчание) — полный контракт завершённого витка;
     --at verify — середина витка, этап 6: без проверок handoff'а.
-  python3 flow-verdict.py --print budget|attempts|action|approved <корень> <slug>
-    печатает одно значение для оркестраторов (раннер e2e) — единственный парсер артефактов,
-    чтобы bash не разбирал те же форматы вторым языком.
+  python3 flow-verdict.py --print budget|attempts|action|approved|chunk|readiness2 <корень> <slug>
+    печатает одно значение для оркестраторов (раннер e2e) — единственный парсер артефактов;
+    и --print, и вердикт зовут ОДНИ И ТЕ ЖЕ хелперы разбора, форматы не расходятся.
 Код возврата: 0 — контракт цел / значение напечатано; 1 — есть провалы; 2 — неверный вызов.
 """
 
@@ -21,15 +21,25 @@ from pathlib import Path
 
 PLACEHOLDER = "‹"
 
-# Обязательный минимум гейтов — дословно из SDLC.md → «Набор гейтов проекта»
-MANDATORY = [
+# Обязательный минимум — фолбэк, дословно из SDLC.md → «Набор гейтов проекта».
+# Первичен сам набор: строки «да — минимум» (mandatory_gates); фолбэк — для наборов без пометки.
+MANDATORY_FALLBACK = [
     "Сборка", "Тесты", "Scope: файлы вне плана", "Анти-обход тест-гейта",
     "Ревью независимым агентом",
 ]
+DEFAULT_BUDGET = "3"  # норма SDLC.md → этап 6; шаблон журнала обязан совпадать
+
+ATTEMPT_ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.M)
+# [^0-9\n] — не перескакивать на цифры следующих строк (номер попытки из таблицы)
+BUDGET_RE = re.compile(r"Бюджет попыток:\*?\*?[^0-9\n]*(\d+)")
+# \b(?!\s*/) — принять «retry — причина…», отвергнуть заготовку «continue / retry / escalate»
+ACTION_RE = re.compile(r"\*\*action:\*\*\s*(continue|retry|escalate)\b(?!\s*/)", re.M)
+ENABLED_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да(?: — минимум)?\s*\|\s*этап 6\s*\|", re.M)
+MANDATORY_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да — минимум\s*\|", re.M)
 
 
 def natsorted(paths):
-    """Сортировка версионированных имён: attempt-10 позже attempt-9, не раньше attempt-2."""
+    """attempt-10 позже attempt-9, а не раньше attempt-2."""
     return sorted(paths, key=lambda p: [int(t) if t.isdigit() else t
                                         for t in re.split(r"(\d+)", p.name)])
 
@@ -38,35 +48,103 @@ def read(p: Path):
     return p.read_text(encoding="utf-8") if p.exists() else None
 
 
+# ------------------------------------------------------------------ разбор артефактов (единый)
+
 def strip_literal_spans(line: str) -> str:
-    """Убрать код в бэктиках и цитаты в «ёлочках» — там ‹…› законно упоминается как символ."""
+    """Убрать код в бэктиках и цитаты в «ёлочках», где ‹…› — упоминание символа.
+
+    Осознанное ограничение: настоящая дыра ВНУТРИ «ёлочек» («…‹причина›…») механически
+    неотличима от легитимной цитаты формы («Использовать ‹символ›» в подсказках шаблонов) —
+    проверено на живых артефактах. Скрипт выбирает отсутствие ложных провалов; дыры внутри
+    цитат остаются человеческой части гейта «Заполненность артефактов» (рецензенту).
+    """
     line = re.sub(r"`[^`]*`", "", line)
     line = re.sub(r"«[^»]*»", "", line)
     return line
 
 
 def holes_in(text: str):
-    """Строки с настоящими незаполненными ‹…› (вне кода и цитат)."""
-    return [ln for ln in text.splitlines() if PLACEHOLDER in strip_literal_spans(ln)]
+    """Строки с настоящими ‹…›: вне кода, вне цитат-упоминаний, вне fenced-блоков."""
+    holes, fenced = [], False
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if PLACEHOLDER in strip_literal_spans(ln):
+            holes.append(ln)
+    return holes
 
 
-def md_sections(text: str):
-    """Разбивка по заголовкам второго уровня; ### остаётся внутри своей секции."""
-    return re.split(r"^## ", text, flags=re.M)
+def approval_line(plan: str) -> str:
+    return next((ln for ln in (plan or "").splitlines() if "**Одобрение:**" in ln), "")
 
 
-def claims_in(text):
-    return set(re.findall(r"\bclaim-\d+\b", text or ""))
+def plan_approved(plan: str) -> bool:
+    """Одобрение — значащая часть строки до « / »-альтернативы шаблона.
+
+    «Иван · 2026-08-15 / **не одобрен — …**» (не вычищенный хвост заготовки) — одобрен;
+    «не одобрен — вернуться после 2026-08-20» — НЕ одобрен, дата в причине не спасает;
+    «Тест-Оператор · 2026-08-15 · источник: файл ответов» — одобрен.
+    """
+    value = approval_line(plan).split("**Одобрение:**", 1)[-1].split(" / ")[0]
+    if "не одобрен" in value:
+        return False
+    return bool(re.search(r"20\d\d", value)) or "источник: файл ответов" in value
+
+
+def attempt_nums(journal: str):
+    return [int(k) for k in ATTEMPT_ROW.findall(journal or "")]
+
+
+def budget_of(journal: str) -> str:
+    m = BUDGET_RE.search(journal or "")
+    return m.group(1) if m else DEFAULT_BUDGET
+
+
+def action_of(report: str) -> str:
+    m = ACTION_RE.search(report or "")
+    return m.group(1) if m else "none"
+
+
+def readiness_verdict(readiness: str, n: int) -> str:
+    """Последнее записанное значение вердикта прогона n (протокол может содержать историю)."""
+    vals = re.findall(rf"\*\*Вердикт прогона {n}:\*\*\s*(.+)", readiness or "")
+    return vals[-1].strip() if vals else ""
+
+
+def readiness_ok(readiness: str, n: int) -> bool:
+    v = readiness_verdict(readiness, n).lower()
+    # заготовка «готова / не готова — ‹…›» не считается решением
+    return v.startswith("готова") and "не готова" not in v
+
+
+def journal_chunk_num(p: Path):
+    m = re.search(r"chunk-(\d+)-journal", p.name)
+    return m.group(1) if m else None
 
 
 def gate_row_in(report: str, gate: str) -> bool:
-    """Строка таблицы, начинающаяся с имени гейта, — а не упоминание в прозе."""
     return re.search(rf"^\|\s*{re.escape(gate)}\s*\|", report, flags=re.M) is not None
 
 
 def parse_date(s):
     m = re.search(r"(\d{4}-\d{2}-\d{2})", s or "")
     return m.group(1) if m else None
+
+
+def mandatory_gates(gates: str):
+    marked = [g.strip() for g in MANDATORY_ROW.findall(gates or "")]
+    return marked or MANDATORY_FALLBACK
+
+
+def md_sections(text: str):
+    return re.split(r"^## ", text or "", flags=re.M)
+
+
+def claims_in(text):
+    return set(re.findall(r"\bclaim-\d+\b", text or ""))
 
 
 # ---------------------------------------------------------------- --print для оркестраторов
@@ -76,26 +154,22 @@ def do_print(what: str, root: Path, slug: str) -> int:
     journals = natsorted(d.glob("chunk-*-journal.md"))
     j = read(journals[-1]) if journals else None
     if what == "budget":
-        m = re.search(r"Бюджет попыток:\*?\*?[^0-9]*(\d+)", j or "")
-        print(m.group(1) if m else "3")
-        return 0
-    if what == "attempts":
-        print(len(re.findall(r"^\|\s*\d+\s*\|", j or "", flags=re.M)))
-        return 0
-    if what == "action":
+        print(budget_of(j))
+    elif what == "attempts":
+        print(len(attempt_nums(j)))
+    elif what == "chunk":
+        print(journal_chunk_num(journals[-1]) or "1" if journals else "1")
+    elif what == "action":
         reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
-        r = read(reports[-1]) if reports else ""
-        # якорь в конец строки отвергает шаблонную заготовку «continue / retry / escalate»
-        m = re.search(r"\*\*action:\*\*\s*(continue|retry|escalate)\s*$", r or "", flags=re.M)
-        print(m.group(1) if m else "none")
-        return 0
-    if what == "approved":
-        plan = read(d / "plan.md") or ""
-        line = next((ln for ln in plan.splitlines() if "**Одобрение:**" in ln), "")
-        print("yes" if re.search(r"20\d\d", line) else "no")
-        return 0
-    print(__doc__)
-    return 2
+        print(action_of(read(reports[-1]) if reports else ""))
+    elif what == "approved":
+        print("yes" if plan_approved(read(d / "plan.md") or "") else "no")
+    elif what == "readiness2":
+        print("yes" if readiness_ok(read(d / "readiness.md") or "", 2) else "no")
+    else:
+        print(__doc__)
+        return 2
+    return 0
 
 
 # ---------------------------------------------------------------- вердикт
@@ -103,7 +177,7 @@ def do_print(what: str, root: Path, slug: str) -> int:
 class Verdict:
     def __init__(self):
         self.passed = []
-        self.failed = []  # (check, detail, improvement)
+        self.failed = []
 
     def ok(self, check):
         self.passed.append(check)
@@ -121,19 +195,21 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     sdlc = root / ".sdlc"
     d = sdlc / slug
 
+    # единственное чтение: все md витка + набор
+    texts = {p.name: read(p) for p in natsorted(d.glob("*.md"))}
     gates = read(sdlc / "gates.md")
-    intent = read(d / "intent.md")
-    readiness = read(d / "readiness.md")
-    plan = read(d / "plan.md")
-    handoff = read(d / "handoff.md")
+    texts["gates.md"] = gates
+    intent = texts.get("intent.md")
+    readiness = texts.get("readiness.md")
+    plan = texts.get("plan.md")
+    handoff = texts.get("handoff.md")
     journals = natsorted(d.glob("chunk-*-journal.md"))
-    journal_texts = {p: read(p) for p in journals}
     reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
-    last_report = read(reports[-1]) if reports else None
+    last_report = texts.get(reports[-1].name) if reports else None
     diffs = natsorted(d.glob("chunk-*-attempt-*-diff.patch"))
     tests_out = natsorted(d.glob("chunk-*-attempt-*-tests.txt"))
 
-    # --- 1. Артефакты на месте и непусты: нет файла (или он пуст) — шага не было -----------
+    # --- 1. Артефакты на месте и непусты -----------------------------------------------------
     for name, obj, imp in [
         ("gates.md", gates, "виток стартовал без набора гейтов — усилить предусловие /sdlc-intent"),
         ("intent.md", intent, "этап 1 не оставил задачи"),
@@ -151,10 +227,8 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     v.check(bool(diffs) and bool(tests_out), "diff и вывод тестов попыток",
             "нет файлов attempt-K", "артефакты попыток не сохраняются — детект прогресса слеп")
 
-    # --- 2. Плейсхолдеры — по всем артефактам витка -----------------------------------------
-    scan = {p.name: read(p) for p in natsorted(d.glob("*.md"))}
-    scan["gates.md"] = gates
-    for name, text in scan.items():
+    # --- 2. Плейсхолдеры — по всем артефактам витка -------------------------------------------
+    for name, text in texts.items():
         if not text:
             continue
         holes = holes_in(text)
@@ -163,39 +237,40 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         v.check(not holes, f"нет ‹…› в {name}", detail,
                 "«заполненность артефактов» не выдерживается")
 
-    # --- 3. Решения человека записаны --------------------------------------------------------
+    # --- 3. Решения человека записаны ---------------------------------------------------------
     if plan:
-        line = next((ln for ln in plan.splitlines() if "**Одобрение:**" in ln), "")
-        v.check(bool(re.search(r"20\d\d", line)),
-                "одобрение плана записано", "в строке «Одобрение» нет даты",
-                "одобрение живёт в чате, а не в артефакте — чинить /sdlc-plan Phase 5")
+        v.check(plan_approved(plan), "одобрение плана записано",
+                f"строка «Одобрение»: {approval_line(plan).strip()[:70] or 'отсутствует'}",
+                "одобрение живёт в чате или план явно не одобрен — чинить /sdlc-plan Phase 5")
     if handoff and full:
         v.check(bool(re.search(r"\*\*Приёмка:\*\*", handoff)),
                 "приёмка записана в handoff", "поля «Приёмка» нет",
                 "приёмка человеком не фиксируется — чинить /sdlc-handoff Phase 1")
     for p in journals:
-        j = journal_texts[p] or ""
+        j = texts.get(p.name) or ""
         sig = j.split("Подтвердил:")[1][:80] if "Подтвердил:" in j else ""
         v.check(bool(sig) and PLACEHOLDER not in strip_literal_spans(sig),
                 f"место правки подтверждено ({p.name})", "секция «Место правки» без подписи",
                 "подтверждение места правки не записывается — чинить /sdlc-chunk Phase 2")
     if readiness:
         for n in (1, 2):
-            m = re.search(rf"\*\*Вердикт прогона {n}:\*\*\s*(.+)", readiness)
-            ok_val = bool(m) and m.group(1).strip().startswith("готова")
+            ok_val = readiness_ok(readiness, n)
             v.check(ok_val, f"readiness: прогон {n} — «готова»",
-                    "вердикт отсутствует или не «готова»" if not m
-                    else f"вердикт: {m.group(1).strip()[:50]}",
+                    f"вердикт: {readiness_verdict(readiness, n)[:50] or 'отсутствует'}",
                     "виток идёт с непринятой готовностью — чинить предусловия этапов 2/4")
 
-    # --- 4. Попытки: нумерация цела, ничего не затёрто — по каждому chunk'у ------------------
+    # --- 4. Попытки: нумерация цела — по каждому chunk'у ---------------------------------------
     for p in journals:
-        j = journal_texts[p] or ""
-        n = re.search(r"chunk-(\d+)-journal", p.name).group(1)
-        rows = re.findall(r"^\|\s*(\d+)\s*\|", j, flags=re.M)
-        v.check(bool(rows), f"в журнале chunk-{n} есть строки попыток",
+        j = texts.get(p.name) or ""
+        n = journal_chunk_num(p)
+        if n is None:
+            v.fail(f"имя журнала {p.name}", "нет номера chunk'а в имени",
+                   "журналы именуются chunk-N-journal.md — иначе сверки слепнут")
+            continue
+        nums = attempt_nums(j)
+        v.check(bool(nums), f"в журнале chunk-{n} есть строки попыток",
                 "таблица «Попытки» пуста", "счёт попыток не ведётся")
-        for k in range(1, len(rows) + 1):
+        for k in nums:  # по фактическим номерам из таблицы, не по range
             v.check((d / f"chunk-{n}-attempt-{k}-diff.patch").exists(),
                     f"diff chunk-{n} попытки {k} сохранён", "файла нет",
                     "попытки перезаписывают друг друга — детект прогресса слеп")
@@ -204,7 +279,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 "отчёты приёмки по попыткам", "имена без attempt-K",
                 "история возвратов стирается")
 
-    # --- 5. Claims сквозные + структура листа -------------------------------------------------
+    # --- 5. Claims сквозные + структура листа --------------------------------------------------
     if intent and plan and last_report:
         ci, cp, cr = claims_in(intent), claims_in(plan), claims_in(last_report)
         v.check(ci == cp, "claims intent == plan",
@@ -214,7 +289,6 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 f"разница: {sorted(ci ^ cr)}",
                 "отчёт приёмки не покрывает лист 1:1")
     if intent:
-        # структура листа: держится и после правок этапов 2–3 (прогон 2 проверяет то же)
         rows = [ln for ln in intent.splitlines() if re.match(r"^\|\s*claim-\d+\s*\|", ln)]
         cells_ok = all(len([c for c in r.split("|") if c.strip()]) >= 3 for r in rows)
         small = bool(re.search(r"\*\*Контур:\*\*\s*мелкий", intent))
@@ -229,20 +303,21 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                     f"пунктов {len(rows)}, [edge] {edge}",
                     "правка листа после прогона 1 уронила структуру ниже минимума")
 
-    # --- 6. Гейты: минимум включён; включённые «этап 6» имеют строку в отчёте -----------------
+    # --- 6. Гейты: минимум включён; включённые «этап 6» имеют строку в отчёте -------------------
     if gates:
-        for g in MANDATORY:
-            v.check(bool(re.search(rf"^\|\s*{re.escape(g)}\s*\|\s*да\s*\|", gates, flags=re.M)),
+        for g in mandatory_gates(gates):
+            v.check(bool(re.search(
+                        rf"^\|\s*{re.escape(g)}\s*\|\s*да(?: — минимум)?\s*\|", gates, flags=re.M)),
                     f"минимум: «{g}» включён", "строка не «да»",
                     "обязательный минимум выключен среди витка — набор не собран")
     if gates and last_report:
-        enabled = [m.group(1).strip() for m in
-                   re.finditer(r"^\|\s*([^|]+?)\s*\|\s*да\s*\|\s*этап 6\s*\|", gates, flags=re.M)]
-        # «гейт введён после отчёта» выводится из дат: строка журнала о включении датирована
-        # позже, чем «Набор гейтов: от ‹дата›» в шапке отчёта
-        report_gates_date = parse_date(
-            next((ln for ln in last_report.splitlines() if "Набор гейтов:" in ln), ""))
-        enabled_rows = {}  # гейт -> (последняя дата включения, причина)
+        enabled = [m.strip() for m in ENABLED_ROW.findall(gates)]
+        header = next((ln for ln in last_report.splitlines() if "Набор гейтов:" in ln), "")
+        report_gates_date = parse_date(header)
+        v.check(bool(report_gates_date), "дата набора в шапке отчёта читается",
+                f"строка шапки: {header.strip()[:60] or 'отсутствует'}",
+                "без даты набора нельзя отличить гейт, введённый после отчёта")
+        enabled_rows = {}
         for m in re.finditer(
                 r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([^|]+?)\s*\|[^|]*→\s*да\s*\|\s*([^|]*)\|",
                 gates, flags=re.M):
@@ -252,10 +327,11 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         for g in enabled:
             date, reason = enabled_rows.get(g, ("", ""))
             # позже даты набора из отчёта — введён после; та же дата различима только по причине:
-            # запись ссылается на текущий виток (его записи о дефектах заводит этап 7)
+            # запись ссылается на ТЕКУЩИЙ виток целым словом (slug-подстрока не считается)
             late = bool(report_gates_date) and (
                 date > report_gates_date
-                or (date == report_gates_date and slug in reason))
+                or (date == report_gates_date
+                    and re.search(rf"\b{re.escape(slug)}\b", reason)))
             if late and not gate_row_in(last_report, g):
                 v.ok(f"гейт «{g}» включён после отчёта ({date}) — строка не требуется")
                 continue
@@ -264,7 +340,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         v.check(bool(re.search(r"\*\*passed:\*\*", last_report)), "вердикт в отчёте",
                 "поля **passed:** нет", "вердикт не посчитан")
 
-    # --- 7. Scope: .sdlc не в files_to_touch ---------------------------------------------------
+    # --- 7. Scope: .sdlc не в files_to_touch ----------------------------------------------------
     if plan:
         section = next((s for s in md_sections(plan) if s.startswith("files_to_touch")), "")
         table_rows = [ln for ln in section.splitlines() if ln.strip().startswith("|")]
@@ -272,7 +348,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 "files_to_touch без .sdlc/**", ".sdlc в таблице путей",
                 "артефакты процесса попали в scope кода")
 
-    # --- Отчёт ----------------------------------------------------------------
+    # --- Отчёт -----------------------------------------------------------------------------------
     print(f"# Вердикт флоу: {slug} (--at {at})\n")
     print(f"Пройдено проверок: {len(v.passed)} · Провалено: {len(v.failed)}\n")
     if v.failed:

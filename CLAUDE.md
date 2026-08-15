@@ -38,10 +38,6 @@ test/run-e2e.sh [dir]          # полный e2e-прогон флоу (дор�
 python3 test/verdict.py <run-dir> <slug>   # механический контракт флоу по готовым артефактам
 ```
 
-Установка реализации (из `implementations/claude-code/`):
-
-```bash
-mkdir -p ~/.claude/skills ~/.claude/agents
-cp -r skills/*  ~/.claude/skills/
-cp    agents/*  ~/.claude/agents/
-```
+Установка реализации — только через `./install.sh` (бэкап расходящихся глобальных версий +
+честная синхронизация sdlc-*; `--check` — сверка). Голый `cp -r` не использовать: он не удаляет
+убранные из репо файлы и молча затирает пользовательские правки.

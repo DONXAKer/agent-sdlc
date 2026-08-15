@@ -142,8 +142,14 @@ def main(root: Path, slug: str) -> int:
         rep = read(reports[-1])
         enabled = [m.group(1).strip() for m in
                    re.finditer(r"^\|\s*([^|]+?)\s*\|\s*да\s*\|\s*этап 6\s*\|", gates, flags=re.M)]
-        # гейт, введённый записью о дефекте этого же витка (этап 7), в отчёт этапа 6 попасть не мог
-        introduced_late = set(re.findall(r"^\|[^|]+\|\s*([^|]+?)\s*\|\s*[^|]*нов[^|]*\|", gates, flags=re.M))
+        # гейт, введённый записью о дефекте этого же витка (этап 7), в отчёт этапа 6 попасть не мог:
+        # ловим по журналу набора — «нов…» в переходе или «запись о дефекте» в причине
+        introduced_late = set(
+            re.findall(r"^\|[^|]+\|\s*([^|]+?)\s*\|\s*[^|]*нов[^|]*\|", gates, flags=re.M)
+        ) | set(
+            re.findall(r"^\|[^|]+\|\s*([^|]+?)\s*\|[^|]*\|[^|]*запис[ьи] о дефекте[^|]*\|",
+                       gates, flags=re.M)
+        )
         for g in enabled:
             if g in introduced_late and g not in rep:
                 v.ok(f"гейт «{g}» введён после отчёта (петля улучшения) — строка не требуется")

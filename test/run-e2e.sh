@@ -12,15 +12,18 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SLUG="SCHED-101"
+# Параметры прогона: другой виток задаётся окружением, умолчания — SCHED-101
+SLUG="${SLUG:-SCHED-101}"
+TASK_FILE="${TASK_FILE:-$REPO/test/task.md}"
+ANSWERS_FILE="${ANSWERS_FILE:-$REPO/test/answers.md}"
 RUN="${1:-$(mktemp -d "${TMPDIR:-/tmp}/sdlc-e2e.XXXXXX")}"
 mkdir -p "$RUN/logs"
-echo "run dir: $RUN"
+echo "run dir: $RUN · slug: $SLUG"
 
 # --- рабочая копия fixture + git ---------------------------------------------
 cp -R "$REPO/test/fixture/." "$RUN/"
-cp "$REPO/test/task.md" "$RUN/TASK.md"
-cp "$REPO/test/answers.md" "$RUN/ANSWERS.md"
+cp "$TASK_FILE" "$RUN/TASK.md"
+cp "$ANSWERS_FILE" "$RUN/ANSWERS.md"
 mkdir -p "$RUN/.claude"
 cat > "$RUN/.claude/settings.json" <<'JSON'
 { "permissions": { "defaultMode": "bypassPermissions" } }
@@ -80,7 +83,7 @@ stage 4-plan    "/sdlc-plan $SLUG"
 stage 5-chunk   "/sdlc-chunk $SLUG"
 stage 6-verify  "/sdlc-verify $SLUG 1"
 # retry-петля: если вердикт retry — ещё одна попытка chunk+verify (не больше одной в e2e)
-if grep -qi "action.*retry" .sdlc/$SLUG/verification-report-1-attempt-1.md 2>/dev/null; then
+if grep -qi "action.*retry" ".sdlc/$SLUG/verification-report-1-attempt-1.md" 2>/dev/null; then
   stage 5b-chunk-retry "/sdlc-chunk $SLUG"
   stage 6b-verify-retry "/sdlc-verify $SLUG 1"
 fi

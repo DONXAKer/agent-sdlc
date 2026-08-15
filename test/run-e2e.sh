@@ -10,11 +10,12 @@
 # Запуск:  test/run-e2e.sh [run-dir]
 #          SLUG=… TASK_FILE=… ANSWERS_FILE=… — другой виток
 #          RESUME=1 test/run-e2e.sh <run-dir> — продолжить оборванный прогон с места по артефактам
-# Retry-петля крутится до бюджета попыток из журнала chunk'а. Все значения из артефактов читает
-# единственный парсер — flow-verdict.py --print (bash формат артефактов не разбирает). Verify,
-# отработавший без нового отчёта, — немедленный обрыв. Обрыв любого этапа всё равно завершается
-# handoff'ом и вердиктом. Итог: артефакты в <run-dir>/.sdlc/<SLUG>/, логи в <run-dir>/logs/,
-# вердикт в verdict.md.
+# Retry-петля крутится до бюджета попыток из журнала chunk'а; `continue` при плане, оставляющем
+# пункты следующим chunk'ам, открывает следующую связку 5→6, иначе — handoff. Все значения из
+# артефактов читает единственный парсер — flow-verdict.py --print (bash формат артефактов
+# не разбирает и имена файлов не глобит). Verify, отработавший без нового отчёта, — немедленный
+# обрыв. Обрыв любого этапа всё равно завершается handoff'ом и вердиктом. Итог: артефакты
+# в <run-dir>/.sdlc/<SLUG>/, логи в <run-dir>/logs/, вердикт в verdict.md.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,9 +37,16 @@ echo "run dir: $RUN · slug: $SLUG · resume: $RESUME"
 if [ "$RESUME" != "1" ]; then
   cp -R "$REPO/test/fixture/." "$RUN/"
   # чистая рабочая копия: кэш от make test (git и так игнорирует, но пусть не мозолит diff'ы)
-  # и Finder-мусор — .DS_Store fixture/.gitignore НЕ кроет и он попал бы в baseline-коммит
-  find "$RUN" \( -name __pycache__ -type d -prune -exec rm -rf {} + \) \
-       -o -name .DS_Store -delete 2>/dev/null || true
+  # и Finder-мусор — .DS_Store fixture/.gitignore НЕ кроет и он попал бы в baseline-коммит.
+  # Список имён — общий с install.sh (junk-names.sh); без -delete: он включает -depth
+  # и ломает -prune
+  source "$REPO/junk-names.sh"
+  for j in "${JUNK_DIRS[@]}"; do
+    find "$RUN" -name "$j" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+  done
+  for j in "${JUNK_FILES[@]}"; do
+    find "$RUN" -name "$j" -type f -exec rm -f {} + 2>/dev/null || true
+  done
   cp "$TASK_FILE" "$RUN/TASK.md"
   cp "$ANSWERS_FILE" "$RUN/ANSWERS.md"
   mkdir -p "$RUN/.claude"
@@ -78,7 +86,51 @@ stage() {
 
 D=".sdlc/$SLUG"
 pv() { python3 "$TOOL" --print "$1" "$RUN" "$SLUG"; }   # единственный парсер артефактов
-reports_count() { find "$D" -maxdepth 1 -name 'verification-report-*-attempt-*.md' 2>/dev/null | wc -l | tr -d ' '; }
+# снимок состояния одним субпроцессом: pv all → key=value → переменные S_*
+# (формат имён отчётов и журналов знает только flow-verdict — bash артефакты не глобит)
+snapshot() {
+  local out k v
+  out=$(pv all) || return 1
+  while IFS='=' read -r k v; do
+    case "$k" in
+      action)     S_ACTION="$v" ;;
+      attempts)   S_ATTEMPTS="$v" ;;
+      budget)     S_BUDGET="$v" ;;
+      chunk)      S_CHUNK="$v" ;;
+      reports)    S_REPORTS="$v" ;;
+      next_chunk) S_NEXT="$v" ;;
+    esac
+  done <<< "$out"
+}
+
+run_iteration() {
+  # одна пара chunk → verify с детектами прогресса и нового отчёта;
+  # вход: $1 — число попыток последнего журнала на момент снимка
+  local n="$1" k=$((n + 1)) before="$S_REPORTS" ch0="$S_CHUNK" ch n2 after
+  # before снимается ДО chunk-стадии: окно шире (экзотика «chunk сам написал отчёт»
+  # засчитается verify), но зато «verify ничего не оставил» ловится всегда; чужой
+  # отчёт от chunk'а — нарушение другого рода, его ловит рецензент и scope-гейт.
+  # Имя лога — из состояния ДО стадии (chunk + следующая попытка): при легитимном открытии
+  # следующего журнала фактический номер попытки другой, но имя уникально и не затирается
+  stage "5-chunk-${ch0}-attempt-$k" "/sdlc-chunk $SLUG" || return 1
+  snapshot || { ABORTED="pv-сбой"; return 1; }
+  ch="$S_CHUNK"; n2="$S_ATTEMPTS"
+  # прогресс = новая строка в ТОМ ЖЕ журнале, либо chunk легитимно открыл следующий
+  # журнал (мультичанковый план) — сравнение пары (chunk, attempts), не голых счётчиков
+  if [ "$ch" = "$ch0" ] && [ "$n2" -le "$n" ]; then
+    echo "chunk отработал, но строка попытки в журнале не прибавилась ($n → $n2) — останов"
+    ABORTED="chunk-без-строки-попытки"
+    return 1
+  fi
+  stage "6-verify-${ch}-attempt-$n2" "/sdlc-verify $SLUG $ch" || return 1
+  snapshot || { ABORTED="pv-сбой"; return 1; }
+  after="$S_REPORTS"
+  if [ "$after" -le "$before" ]; then
+    echo "verify отработал, но отчёта не прибавилось ($before → $after) — останов"
+    ABORTED="verify-без-отчёта"
+    return 1
+  fi
+}
 
 main_flow() {
   if ! { [ "$RESUME" = "1" ] && [ -s "$D/readiness.md" ]; }; then
@@ -97,51 +149,32 @@ main_flow() {
     stage 4-plan "/sdlc-plan $SLUG" || return 1
   fi
 
-  # цикл chunk → verify до continue/escalate или исчерпания бюджета;
+  # цикл chunk → verify до закрытия плана, эскалации или исчерпания бюджета;
   # verify обязан оставлять отчёт — «этап прошёл, отчёта не прибавилось» = немедленный обрыв
   while :; do
-    local act n b
-    act=$(pv action) || { ABORTED="pv-сбой"; return 1; }
-    n=$(pv attempts) || { ABORTED="pv-сбой"; return 1; }
+    snapshot || { ABORTED="pv-сбой"; return 1; }
+    local act="$S_ACTION" n="$S_ATTEMPTS"
     case "$act" in
-      continue) break ;;
+      continue)
+        # норма verify: план закрыт — handoff; оставляет пункты следующим chunk'ам —
+        # следующая связка 5→6 (бюджет попыток нового chunk'а свой, здесь не проверяется)
+        [ "$S_NEXT" = "yes" ] || break
+        run_iteration "$n" || return 1
+        ;;
       escalate) echo "ЭСКАЛАЦИЯ после попытки $n — handoff оформит обрыв"; break ;;
       retry|none)
         # мусорный отчёт распознаётся ДО проверки бюджета — иначе на последней попытке
         # «отчёт-без-action» маскировался бы под штатное исчерпание бюджета
-        if [ "$act" = "none" ] && [ "$(reports_count)" -gt 0 ]; then
+        if [ "$act" = "none" ] && [ "$S_REPORTS" -gt 0 ]; then
           echo "последний отчёт приёмки без валидного action — останов"
           ABORTED="отчёт-без-action"
           return 1
         fi
-        b=$(pv budget) || { ABORTED="pv-сбой"; return 1; }
-        if [ "$n" -ge "$b" ]; then
-          echo "бюджет попыток ($b) исчерпан (action=$act) — handoff оформит обрыв"
+        if [ "$n" -ge "$S_BUDGET" ]; then
+          echo "бюджет попыток ($S_BUDGET) исчерпан (action=$act) — handoff оформит обрыв"
           break
         fi
-        local k=$((n + 1)) before after ch0 ch n2
-        # before снимается ДО chunk-стадии: окно шире (экзотика «chunk сам написал отчёт»
-        # засчитается verify), но зато «verify ничего не оставил» ловится всегда; чужой
-        # отчёт от chunk'а — нарушение другого рода, его ловит рецензент и scope-гейт
-        before=$(reports_count)
-        ch0=$(pv chunk) || { ABORTED="pv-сбой"; return 1; }
-        stage "5-chunk-attempt-$k"  "/sdlc-chunk $SLUG" || return 1
-        ch=$(pv chunk) || { ABORTED="pv-сбой"; return 1; }
-        n2=$(pv attempts) || { ABORTED="pv-сбой"; return 1; }
-        # прогресс = новая строка в ТОМ ЖЕ журнале, либо chunk легитимно открыл следующий
-        # журнал (мультичанковый план) — сравнение пары (chunk, attempts), не голых счётчиков
-        if [ "$ch" = "$ch0" ] && [ "$n2" -le "$n" ]; then
-          echo "chunk отработал, но строка попытки в журнале не прибавилась ($n → $n2) — останов"
-          ABORTED="chunk-без-строки-попытки"
-          return 1
-        fi
-        stage "6-verify-attempt-$k" "/sdlc-verify $SLUG $ch" || return 1
-        after=$(reports_count)
-        if [ "$after" -le "$before" ]; then
-          echo "verify отработал, но отчёта не прибавилось ($before → $after) — останов"
-          ABORTED="verify-без-отчёта"
-          return 1
-        fi
+        run_iteration "$n" || return 1
         ;;
       *)
         echo "неожиданное значение action от pv: «$act» — останов"

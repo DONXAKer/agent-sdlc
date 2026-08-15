@@ -131,20 +131,35 @@ class Scheduler:
                 continue
             _, _, tid = heapq.heappop(self._ready)
             self._execute(tid)
-            self._promote_ready()
+            self._promote_ready(tid)
         return {t.id: t.state for t in self.tasks.values()}
 
-    def _promote_ready(self):
-        for t in self.tasks.values():
-            if t.state is not TaskState.PENDING:
-                continue
-            deps = [self.tasks[d] for d in self.graph.dependencies(t.id)]
-            if any(d.state in (TaskState.FAILED, TaskState.BLOCKED) for d in deps):
-                t.state = TaskState.BLOCKED
-                self._emit("blocked", t.id)
-                continue
-            if all(d.state is TaskState.DONE for d in deps):
-                self._enqueue_ready(t.id)
+    def _promote_ready(self, completed=None):
+        """Без аргумента — стартовый скан всех задач; с id завершившейся — продвижение
+        только её зависимых по обратным рёбрам графа: O(соседей) вместо полного скана
+        после каждого исполнения. Обход зависимых сортируется — порядок событий детерминирован.
+        """
+        if completed is None:
+            for t in self.tasks.values():
+                if t.state is TaskState.PENDING and self._deps_done(t.id):
+                    self._enqueue_ready(t.id)
+            return
+        t = self.tasks[completed]
+        if t.state is TaskState.DONE:
+            for dep_id in sorted(self.graph.dependents(completed)):
+                dep = self.tasks[dep_id]
+                if dep.state is TaskState.PENDING and self._deps_done(dep_id):
+                    self._enqueue_ready(dep_id)
+        elif t.state is TaskState.FAILED:
+            for dep_id in sorted(self.graph.transitive_dependents(completed)):
+                dep = self.tasks[dep_id]
+                if dep.state is TaskState.PENDING:
+                    dep.state = TaskState.BLOCKED
+                    self._emit("blocked", dep_id)
+
+    def _deps_done(self, tid):
+        return all(self.tasks[d].state is TaskState.DONE
+                   for d in self.graph.dependencies(tid))
 
     def _enqueue_ready(self, tid):
         t = self.tasks[tid]
@@ -163,13 +178,13 @@ class Scheduler:
             t.state = TaskState.FAILED
             self._emit("failed", tid)
             return
-        if t.resources and not self.pool.acquire(tid, t.resources):
-            # ресурсов нет — вернуть в хвост той же очереди с штрафом времени
-            self.clock += 0.1
-            self._seq += 1
-            heapq.heappush(self._ready, (-t.priority + 1, self._seq, tid))
-            self._emit("resource_wait", tid)
-            return
+        if t.resources:
+            # к началу каждого исполнения пул полон: цикл однопоточный, а _execute
+            # возвращает всё через release_all на каждом пути — выполнимый запрос
+            # (can_ever_satisfy выше) захватывается всегда; провал захвата = сломанный
+            # инвариант пула, падаем громко, а не крутим недостижимый requeue
+            acquired = self.pool.acquire(tid, t.resources)
+            assert acquired, f"resource pool not full at execute: {t.resources}"
         t.state = TaskState.RUNNING
         t.attempts += 1
         self._emit("start", tid)

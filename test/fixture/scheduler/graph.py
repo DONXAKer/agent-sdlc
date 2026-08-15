@@ -39,19 +39,26 @@ class DependencyGraph:
         self._dependents[depends_on].add(node)
 
     def _find_path(self, src, dst):
-        """Путь src -> ... -> dst по рёбрам зависимостей, или None."""
+        """Путь src -> ... -> dst по рёбрам зависимостей, или None.
+
+        parent-словарь вместо копии пути в каждом элементе стека: путь
+        восстанавливается один раз — когда dst действительно найден."""
         if src == dst:
             return [src]
-        stack = [(src, [src])]
-        seen = {src}
+        parent = {src: None}
+        stack = [src]
         while stack:
-            cur, path = stack.pop()
+            cur = stack.pop()
             for nxt in self._deps.get(cur, ()):
+                if nxt in parent:
+                    continue
+                parent[nxt] = cur
                 if nxt == dst:
-                    return path + [nxt]
-                if nxt not in seen:
-                    seen.add(nxt)
-                    stack.append((nxt, path + [nxt]))
+                    path = [nxt]
+                    while parent[path[-1]] is not None:
+                        path.append(parent[path[-1]])
+                    return path[::-1]
+                stack.append(nxt)
         return None
 
     def dependencies(self, node):

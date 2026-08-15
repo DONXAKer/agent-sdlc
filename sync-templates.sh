@@ -41,6 +41,32 @@ for row in "${MAP[@]}"; do
   done
 done
 
+# --- сироты: копия в скилле, которой нет в корне (шаблон удалён/переименован) ---------------
+# без этого --check зелёный при осиротевшей копии, а install.sh разносит её пользователям
+for dst in "$SKILLS"/*/templates/*.md; do
+  [ -e "$dst" ] || continue
+  if [ ! -f "templates/$(basename "$dst")" ]; then
+    if [[ "$mode" == "--check" ]]; then
+      echo "СИРОТА (в корне templates/ такого шаблона нет): $dst"
+      fail=1
+    else
+      rm -f "$dst"
+      echo "удалена сирота: $dst"
+    fi
+  fi
+done
+
+# --- умолчание бюджета попыток: DEFAULT_BUDGET кода обязан совпадать с шаблоном журнала ------
+code_budget=$(sed -n 's/^DEFAULT_BUDGET = "\([0-9]*\)".*/\1/p' \
+  implementations/claude-code/skills/sdlc-verify/tools/flow-verdict.py)
+tpl_budget=$(sed -n 's|.*/ \([0-9][0-9]*\) — умолчание.*|\1|p' templates/chunk-journal.template.md)
+if [[ -z "$code_budget" || "$code_budget" != "$tpl_budget" ]]; then
+  echo "РАЗОШЛОСЬ умолчание бюджета попыток: flow-verdict.py DEFAULT_BUDGET=«$code_budget» ↔ chunk-journal.template.md «$tpl_budget»"
+  fail=1
+fi
+
 if [[ "$mode" == "--check" ]]; then
   [[ $fail -eq 0 ]] && echo "Копии шаблонов совпадают с корнем." || exit 1
+else
+  [[ $fail -eq 0 ]] || exit 1
 fi

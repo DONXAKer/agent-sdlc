@@ -9,8 +9,9 @@
   python3 flow-verdict.py [--at verify|handoff] <корень проекта> <slug>
     --at handoff (умолчание) — полный контракт завершённого витка;
     --at verify — середина витка, этап 6: без проверок handoff'а.
-  python3 flow-verdict.py --print budget|attempts|action|approved|chunk|readiness2 <корень> <slug>
+  python3 flow-verdict.py --print budget|attempts|action|approved|chunk|readiness2|reports|next_chunk|all <корень> <slug>
     печатает одно значение для оркестраторов (раннер e2e) — единственный парсер артефактов;
+    `all` печатает все значения разом строками key=value (один субпроцесс на итерацию раннера);
     и --print, и вердикт зовут ОДНИ И ТЕ ЖЕ хелперы разбора, форматы не расходятся.
 Код возврата: 0 — контракт цел / значение напечатано; 1 — есть провалы; 2 — неверный вызов.
 """
@@ -37,8 +38,10 @@ BUDGET_RE = re.compile(r"Бюджет попыток\*{0,2}:\*{0,2}[^0-9\n‹]*(
 # «continue / retry / escalate» (слэш + другое action-слово)
 ACTION_RE = re.compile(
     r"\*\*action:\*\*\s*(continue|retry|escalate)\b(?!\s*/\s*(?:continue|retry|escalate))", re.M)
-ENABLED_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да(?: — минимум)?\s*\|\s*этап 6\s*\|", re.M)
-MANDATORY_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да — минимум\s*\|", re.M)
+# «да» с человеческим комментарием («да (с 2026-08)», «да, см. журнал») — тоже включён:
+# жёсткое «ровно да» молча выводило бы такой гейт из-под сверки. (?!\w) отсекает слова на «да…»
+ENABLED_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да(?!\w)[^|]*\|\s*этап 6\s*\|", re.M)
+MANDATORY_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да — минимум(?!\w)[^|]*\|", re.M)
 
 
 def natsorted(paths):
@@ -93,13 +96,17 @@ def plan_approved(plan: str) -> bool:
 
     «Иван · 2026-08-15 / **не одобрен — …**» (не вычищенный хвост заготовки) — одобрен;
     «не одобрен — вернуться после 2026-08-20» — НЕ одобрен, дата в причине не спасает;
+    «ожидается решение к 2026-08-20» — НЕ одобрен: слово ожидания сильнее даты;
     «Тест-Оператор · 2026-08-15 · источник: файл ответов» — одобрен.
     """
     raw = approval_line(plan).split("**Одобрение:**", 1)[-1]
     # отрезаем только хвост заготовки «/ не одобрен — …» (болд необязателен, пробелы любые);
     # слэш внутри значения («Иван / Оператор») не трогаем
     value = re.split(r"\s*/\s*\*{0,2}не одобрен", raw)[0]
-    if "не одобрен" in value:
+    # решение ещё не принято: отрицание или слово ожидания в значении — не одобрение,
+    # даже если рядом стоит дата; сомнение трактуется как «не одобрен» (ложный провал громкий,
+    # ложное «одобрен» пропускало бы неодобренный план молча)
+    if re.search(r"(?<!\w)не\s|ожида|отложен|позже|вернуться|tbd|\?", value, re.I):
         return False
     return bool(re.search(r"20\d\d", value)) or "источник: файл ответов" in value
 
@@ -128,8 +135,10 @@ def budget_of(journal: str) -> str:
 
 
 def action_of(report: str) -> str:
-    m = ACTION_RE.search(report or "")
-    return m.group(1) if m else "none"
+    """Последнее записанное значение — то же правило, что у readiness_verdict:
+    артефакт может содержать историю, действует свежая запись."""
+    vals = ACTION_RE.findall(report or "")
+    return vals[-1] if vals else "none"
 
 
 def readiness_verdict(readiness: str, n: int) -> str:
@@ -140,6 +149,10 @@ def readiness_verdict(readiness: str, n: int) -> str:
 
 def readiness_ok(readiness: str, n: int) -> bool:
     v = readiness_verdict(readiness, n).lower()
+    # нормализация оформления: болд/код и лишние пробелы не должны прятать отрицание
+    # («**не** готова», «не  готова» — это отказ, а не «готова»)
+    v = re.sub(r"[*_`]", "", v)
+    v = re.sub(r"\s+", " ", v)
     # граница слова: «✅ готова» — ок; «неготова» (слитно), «не готова…» и заготовка
     # «готова / не готова — ‹…›» — нет
     return bool(re.search(r"(?<!\w)готова", v)) and "не готова" not in v
@@ -148,6 +161,21 @@ def readiness_ok(readiness: str, n: int) -> bool:
 def journal_chunk_num(p: Path):
     m = re.search(r"chunk-(\d+)-journal", p.name)
     return m.group(1) if m else None
+
+
+def plan_more_chunks(plan: str, cur: str) -> bool:
+    """План оставляет пункты chunk'ам с номером больше текущего?
+
+    Читает строку плана «Уходит следующим chunk'ам»: «нет — …» или отсутствие
+    упоминаний chunk-N с номером выше текущего означает, что план закрыт."""
+    line = next((ln for ln in (plan or "").splitlines()
+                 if "Уходит следующим chunk'ам" in ln), "")
+    nums = [int(x) for x in re.findall(r"chunk-(\d+)", line)]
+    try:
+        cur_n = int(cur)
+    except (TypeError, ValueError):
+        cur_n = 0
+    return any(x > cur_n for x in nums)
 
 
 def gate_row_in(report: str, gate: str) -> bool:
@@ -174,26 +202,30 @@ def claims_in(text):
 
 def do_print(what: str, root: Path, slug: str) -> int:
     d = root / ".sdlc" / slug
-    if what in ("budget", "attempts", "chunk"):
-        journals = natsorted(d.glob("chunk-*-journal.md"))
-        j = read(journals[-1]) if journals else None
-        if what == "budget":
-            print(budget_of(j))
-        elif what == "attempts":
-            print(len(attempt_nums(j)))
-        else:
-            num = journal_chunk_num(journals[-1]) if journals else None
-            print(num or "1")
-    elif what == "action":
-        reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
-        print(action_of(read(reports[-1]) if reports else ""))
-    elif what == "approved":
-        print("yes" if plan_approved(read(d / "plan.md") or "") else "no")
-    elif what == "readiness2":
-        print("yes" if readiness_ok(read(d / "readiness.md") or "", 2) else "no")
-    else:
+    journals = natsorted(d.glob("chunk-*-journal.md"))
+    j = read(journals[-1]) if journals else None
+    reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
+    chunk = (journal_chunk_num(journals[-1]) if journals else None) or "1"
+    vals = {
+        "budget": lambda: budget_of(j),
+        "attempts": lambda: len(attempt_nums(j)),
+        "chunk": lambda: chunk,
+        "action": lambda: action_of(read(reports[-1]) if reports else ""),
+        "approved": lambda: "yes" if plan_approved(read(d / "plan.md") or "") else "no",
+        "readiness2": lambda: "yes" if readiness_ok(read(d / "readiness.md") or "", 2) else "no",
+        # число отчётов приёмки: раннер НЕ глобит имена сам — формат имён знает только этот файл
+        "reports": lambda: len(reports),
+        # план оставляет пункты следующим chunk'ам? (маршрут continue: chunk или handoff)
+        "next_chunk": lambda: "yes" if plan_more_chunks(read(d / "plan.md") or "", chunk) else "no",
+    }
+    if what == "all":
+        for k in sorted(vals):
+            print(f"{k}={vals[k]()}")
+        return 0
+    if what not in vals:
         print(__doc__)
         return 2
+    print(vals[what]())
     return 0
 
 
@@ -306,10 +338,15 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
             v.check((d / f"chunk-{n}-attempt-{k}-diff.patch").exists(),
                     f"diff chunk-{n} попытки {k} сохранён", "файла нет",
                     "попытки перезаписывают друг друга — детект прогресса слеп")
-    if journals:
-        v.check(len(reports) >= 1 and all("attempt" in r.name for r in reports),
-                "отчёты приёмки по попыткам", "имена без attempt-K",
-                "история возвратов стирается")
+            v.check((d / f"chunk-{n}-attempt-{k}-tests.txt").exists(),
+                    f"вывод тестов chunk-{n} попытки {k} сохранён", "файла нет",
+                    "вывод тестов попытки потерян — сверка итогов этапа 6 слепа")
+            if full:
+                # на середине витка (--at verify) отчёт текущей попытки ещё пишется —
+                # по-попыточная сверка отчётов возможна только на handoff'е
+                v.check((d / f"verification-report-{n}-attempt-{k}.md").exists(),
+                        f"отчёт приёмки chunk-{n} попытки {k} сохранён", "файла нет",
+                        "история возвратов стирается — отчёт попытки затёрт или не записан")
 
     # --- 5. Claims сквозные + структура листа --------------------------------------------------
     if intent and plan and last_report:
@@ -322,7 +359,10 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 "отчёт приёмки не покрывает лист 1:1")
     if intent:
         rows = [ln for ln in intent.splitlines() if re.match(r"^\|\s*claim-\d+\s*\|", ln)]
-        cells_ok = all(len([c for c in r.split("|") if c.strip()]) >= 3 for r in rows)
+        # позиционно: | id | Пункт | Как проверить | … — пустая третья колонка не компенсируется
+        # заполненной четвёртой (опциональной GWT-колонкой)
+        cells = [[c.strip() for c in r.split("|")] for r in rows]
+        cells_ok = all(len(c) > 3 and c[2] and c[3] for c in cells)
         small = bool(re.search(r"\*\*Контур:\*\*\s*мелкий", intent))
         edge = sum("[edge]" in r for r in rows)
         v.check(bool(rows), "в листе есть строки claim-N", "таблица листа пуста или не по форме",
@@ -339,7 +379,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     if gates:
         for g in mandatory_gates(gates):
             v.check(bool(re.search(
-                        rf"^\|\s*{re.escape(g)}\s*\|\s*да(?: — минимум)?\s*\|", gates, flags=re.M)),
+                        rf"^\|\s*{re.escape(g)}\s*\|\s*да(?!\w)[^|]*\|", gates, flags=re.M)),
                     f"минимум: «{g}» включён", "строки нет или в ней не «да» / «да — минимум»",
                     "обязательный минимум выключен среди витка — набор не собран")
     if gates and last_report:
@@ -351,8 +391,9 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 f"строка шапки: {header.strip()[:60] or 'отсутствует'}",
                 "без даты набора нельзя отличить гейт, введённый после отчёта")
         enabled_rows = {}
+        # «нет → да — минимум» (включение сразу в минимум) — тоже включение: [^|]* после «да»
         for m in re.finditer(
-                r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([^|]+?)\s*\|[^|]*→\s*да\s*\|\s*([^|]*)\|",
+                r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([^|]+?)\s*\|[^|]*→\s*да(?!\w)[^|]*\|\s*([^|]*)\|",
                 gates, flags=re.M):
             g, date, reason = m.group(2).strip(), m.group(1), m.group(3)
             if date >= enabled_rows.get(g, ("", ""))[0]:

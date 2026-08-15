@@ -109,7 +109,9 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(states["good"], TaskState.DONE)
         self.assertEqual(pool.available("db"), 1)
 
-    def test_resource_contention_requeues(self):
+    def test_resource_contention_serialized(self):
+        """Однопоточный цикл: ресурс освобождён до следующего исполнения, обе задачи
+        исполняются подряд без ожидания, пул в конце полон."""
         pool = ResourcePool({"gpu": 1})
         s = Scheduler(pool)
         s.submit(Task("a", ok(), priority=5, resources=("gpu",)))
@@ -117,6 +119,9 @@ class SchedulerTests(unittest.TestCase):
         states = s.run()
         self.assertEqual(states["a"], TaskState.DONE)
         self.assertEqual(states["b"], TaskState.DONE)
+        started = [tid for _, e, tid in s.events if e == "start"]
+        self.assertEqual(started, ["a", "b"])
+        self.assertEqual(pool.available("gpu"), 1)
 
     def test_impossible_resource_fails_fast(self):
         pool = ResourcePool({"gpu": 1})

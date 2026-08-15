@@ -13,16 +13,25 @@ set -euo pipefail
 IMPL="$(cd "$(dirname "$0")/implementations/claude-code" && pwd)"
 SKILLS_DST="$HOME/.claude/skills"
 AGENTS_DST="$HOME/.claude/agents"
-# Единый список кэш-мусора: сверка (-x) и зачистка (find) обязаны совпадать поимённо
-JUNK_NAMES=(__pycache__ .DS_Store '*.pyc')
-DIFF=(diff -rq); for j in "${JUNK_NAMES[@]}"; do DIFF+=(-x "$j"); done
+# Единый список кэш-мусора живёт в junk-names.sh: сверка (-x) и зачистка (find) строятся
+# из него циклами — расширение списка расширяет обе автоматически
+source "$(cd "$(dirname "$0")" && pwd)/junk-names.sh"
+DIFF=(diff -rq)
+for j in "${JUNK_DIRS[@]}" "${JUNK_FILES[@]}"; do DIFF+=(-x "$j"); done
 
 cleanup_junk() {
-  # выполняется при каждом запуске (и при no-op): мусор не должен жить в установке
+  # выполняется при каждом запуске (и при no-op): мусор не должен жить в установке.
+  # без -delete: он включает -depth и ломает -prune. Симлинки не чистим насквозь —
+  # цель симлинка (например, рабочее дерево репо) не наша установка
   for d in "$SKILLS_DST/"sdlc-*/; do
     [ -e "$d" ] || continue
-    find "$d" \( -name "${JUNK_NAMES[0]}" -type d -prune -exec rm -rf {} + \) \
-         -o -name "${JUNK_NAMES[1]}" -delete -o -name "${JUNK_NAMES[2]}" -delete || true
+    [ -L "${d%/}" ] && continue
+    for j in "${JUNK_DIRS[@]}"; do
+      find "$d" -name "$j" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    done
+    for j in "${JUNK_FILES[@]}"; do
+      find "$d" -name "$j" -type f -exec rm -f {} + 2>/dev/null || true
+    done
   done
 }
 
@@ -31,11 +40,15 @@ stale_skills=(); stale_agents=(); orphan_skills=(); orphan_agents=()
 for src in "$IMPL/skills/"sdlc-*/; do
   [ -e "$src" ] || continue
   name=$(basename "$src")
+  # симлинк diff-«равен» своей цели, но копией не является: честная синхронизация
+  # заменяет его настоящей копией, а не оставляет жить сквозь diff
+  if [ -L "$SKILLS_DST/$name" ]; then stale_skills+=("$name"); continue; fi
   "${DIFF[@]}" "${src%/}" "$SKILLS_DST/$name" >/dev/null 2>&1 || stale_skills+=("$name")
 done
 for src in "$IMPL/agents/"sdlc-*.md; do
   [ -e "$src" ] || continue
   name=$(basename "$src")
+  if [ -L "$AGENTS_DST/$name" ]; then stale_agents+=("$name"); continue; fi
   diff -q "$src" "$AGENTS_DST/$name" >/dev/null 2>&1 || stale_agents+=("$name")
 done
 for dst in "$SKILLS_DST/"sdlc-*; do   # без слэша: ловим и файлы-тёзки скиллов

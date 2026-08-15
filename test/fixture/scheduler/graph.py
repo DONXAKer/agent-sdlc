@@ -80,7 +80,6 @@ class DependencyGraph:
         indeg = {n: len(d) for n, d in self._deps.items()}
         layer = sorted(n for n, d in indeg.items() if d == 0)
         order = []
-        indeg = dict(indeg)
         while layer:
             order.extend(layer)
             nxt = set()

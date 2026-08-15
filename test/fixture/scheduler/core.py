@@ -44,7 +44,15 @@ class ResourcePool:
 
     def __init__(self, capacities):
         self._cap = dict(capacities)
+        self._initial = dict(capacities)  # исходные ёмкости — для проверки выполнимости
         self._held = {}  # owner -> [name, ...] в порядке захвата
+
+    def can_ever_satisfy(self, names):
+        """Выполним ли запрос в принципе: у пустого пула он не выполним никогда."""
+        need = {}
+        for n in names:
+            need[n] = need.get(n, 0) + 1
+        return all(self._initial.get(n, 0) >= c for n, c in need.items())
 
     def acquire(self, owner, names):
         got = []
@@ -148,6 +156,12 @@ class Scheduler:
     def _execute(self, tid):
         t = self.tasks[tid]
         if t.state is not TaskState.READY:
+            return
+        if t.resources and not self.pool.can_ever_satisfy(t.resources):
+            # запрос невыполним ни при каком освобождении — иначе run() зациклится
+            t.error = ValueError(f"resources never satisfiable: {t.resources}")
+            t.state = TaskState.FAILED
+            self._emit("failed", tid)
             return
         if t.resources and not self.pool.acquire(tid, t.resources):
             # ресурсов нет — вернуть в хвост той же очереди с штрафом времени

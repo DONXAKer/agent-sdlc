@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Структура
 
 - **`SDLC.md`** — вся методология одним файлом: семь этапов, гейты, вердикт, словарь терминов. Первоисточник; остальные файлы должны с ним сходиться.
-- **`templates/`** — **канонические** шаблоны артефактов витка (intent, exploration-report, clarification-report, plan, verification-report, handoff, gates).
+- **`templates/`** — **канонические** шаблоны артефактов витка, все девять: intent, readiness, exploration-report, clarification-report, plan, chunk-journal, verification-report, handoff, gates.
 - **`implementations/claude-code/`** — рабочая реализация: восемь скиллов `/sdlc-intent` … `/sdlc-handoff` + `/sdlc-seed` (`skills/*/SKILL.md`) и два субагента с урезанными правами (`agents/sdlc-locator.md` — read-only разведка, `agents/sdlc-reviewer.md` — независимое ревью).
 - **`example/`** — заполненные артефакты одного реального витка (Java/Spring). Виток **намеренно не принят** (ревью нашло дефект) — это часть примера, не ошибка. Артефактов этапа 5 (diff, вывод тестов) в примере нет намеренно: они порождаются кодовой базой витка.
 
@@ -28,7 +28,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Команды
 
-Сборки и тестов нет. Единственная команда — установка реализации (из `implementations/claude-code/`):
+Сборки у документов нет, но проверки есть — прогонять после правок соответствующих зон:
+
+```bash
+./sync-templates.sh            # разлить корневые шаблоны в копии скиллов (после правки шаблона)
+./sync-templates.sh --check    # только сверить (гейт для CI)
+make -C test/fixture test      # тесты fixture-планировщика (16 шт.)
+test/run-e2e.sh [dir]          # полный e2e-прогон флоу (дорого: реальные сессии claude)
+python3 test/verdict.py <run-dir> <slug>   # механический контракт флоу по готовым артефактам
+```
+
+Установка реализации (из `implementations/claude-code/`):
 
 ```bash
 mkdir -p ~/.claude/skills ~/.claude/agents

@@ -118,6 +118,15 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(states["a"], TaskState.DONE)
         self.assertEqual(states["b"], TaskState.DONE)
 
+    def test_impossible_resource_fails_fast(self):
+        pool = ResourcePool({"gpu": 1})
+        s = Scheduler(pool)
+        s.submit(Task("t", ok(), resources=("tpu",)))       # ресурса нет в пуле вовсе
+        s.submit(Task("dep", ok()), depends_on=["t"])
+        states = s.run()                                     # обязан завершиться, не зациклиться
+        self.assertEqual(states["t"], TaskState.FAILED)
+        self.assertEqual(states["dep"], TaskState.BLOCKED)
+
     def test_lifo_release_order(self):
         pool = ResourcePool({"conn": 1, "tx": 1})
         order = []

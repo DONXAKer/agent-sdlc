@@ -1,11 +1,13 @@
 # План: PAY-412 — идемпотентность создания платежа
 
 > Заполненный пример по [`../templates/plan.template.md`](../templates/plan.template.md).
-> Одобрен человеком до начала реализации.
+> Одобрен человеком до начала реализации — и одобрение записано полем, а не оставлено в чате.
 
 - **Задача:** [`intent.md`](intent.md) (PAY-412)
 - **Вход:** exploration-report да · [clarification-report](clarification-report.md) да — разведка
   вскрыла развилки, человек ответил
+- **База:** `9c41f2a` — HEAD `main` на момент одобрения
+- **Одобрение:** А. Грицай · 2026-07-16
 
 ## Подход
 
@@ -34,30 +36,33 @@
 
 ## files_to_touch
 
-| Путь | Что делаем | Почему добавлен сверх разведки |
-|---|---|---|
-| `src/main/java/com/acme/payments/service/PaymentService.java` | обёртка вокруг guard'а, снять `@Transactional` | был в задаче |
-| `src/main/java/com/acme/payments/web/PaymentController.java` | заголовок + выбор кода ответа по `isReplay()` | был в задаче |
-| `src/main/java/com/acme/payments/schedule/PaymentRetryScheduler.java` | обновить вызов под новую сигнатуру | был в задаче |
-| `src/test/java/com/acme/payments/PaymentIdempotencyIT.java` | 9 интеграционных тестов | был в задаче |
+| Путь | Что делаем |
+|---|---|
+| `src/main/java/com/acme/payments/service/PaymentService.java` | обёртка вокруг guard'а, снять `@Transactional` |
+| `src/main/java/com/acme/payments/web/PaymentController.java` | заголовок + выбор кода ответа по `isReplay()` |
+| `src/main/java/com/acme/payments/schedule/PaymentRetryScheduler.java` | обновить вызов под новую сигнатуру |
+| `src/test/java/com/acme/payments/PaymentIdempotencyIT.java` | 9 интеграционных тестов |
 
-**Из задачи исключено:** н/п
+- **Добавлено сверх разведки:** нет — список совпал с «Что придётся тронуть»
+- **Из задачи исключено:** нет
 
 ## Чем закрывается каждый пункт приёмки
 
-| Пункт | Чем закрывается | В этом chunk'е |
-|---|---|---|
-| claim-1 | `retryReturns200` + ветка `isReplay()` в контроллере | да |
-| claim-2 | `retryReturnsSameId` | да |
-| claim-3 | `retryCreatesNoRow` | да |
-| claim-4 | `noKeyReturns201` | да |
-| claim-5 | `noKeyWritesNoKeyRow` + шаг 6 плана | да |
-| claim-6 | `sameKeyOtherBodyReturns409`, маппинг уже существует | да |
-| claim-7 | `sameKeyOtherBodyCreatesNoPayment` | да |
-| claim-8 | `concurrentCreatesOnePayment`, уникальность ключа внутри guard'а | да |
-| claim-9 | тот же тест, ассерт на код ответа проигравшего | да |
-| claim-10 | тот же тест, ассерт на `paymentId` проигравшего | да |
-| claim-11 | `concurrentPublishesEventOnce` — подписчик считает события в гонке | да |
+| Пункт | Чем закрывается |
+|---|---|
+| claim-1 | `retryReturns200` + ветка `isReplay()` в контроллере |
+| claim-2 | `retryReturnsSameId` |
+| claim-3 | `retryCreatesNoRow` |
+| claim-4 | `noKeyReturns201` |
+| claim-5 | `noKeyWritesNoKeyRow` + шаг 6 плана |
+| claim-6 | `sameKeyOtherBodyReturns409`, маппинг уже существует |
+| claim-7 | `sameKeyOtherBodyCreatesNoPayment` |
+| claim-8 | `concurrentCreatesOnePayment`, уникальность ключа внутри guard'а |
+| claim-9 | тот же тест, ассерт на код ответа проигравшего |
+| claim-10 | тот же тест, ассерт на `paymentId` проигравшего |
+| claim-11 | `concurrentPublishesEventOnce` — подписчик считает события в гонке |
+
+- **Уходит следующим chunk'ам:** нет — этот chunk закрывает все пункты
 
 ## Необратимые шаги
 

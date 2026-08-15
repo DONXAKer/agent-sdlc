@@ -18,7 +18,8 @@
    этапа 5 (diff и вывод тестов) в пример не включены — они порождаются кодовой базой витка.
 3. **[`templates/`](templates/)** — формы, которые заполняются по ходу. Это канонический
    комплект; копии внутри `implementations/claude-code/skills/*/templates/` — установочные,
-   при правке шаблона правится корень и копируется в реализацию, не наоборот.
+   при правке шаблона правится корень и разливается скриптом `./sync-templates.sh`
+   (`--check` — сверка для CI), не наоборот.
 4. **[`implementations/`](implementations/)** — готовые реализации методологии на конкретных
    инструментах.
 
@@ -29,7 +30,7 @@
 
 | Вариант | Что это | Статус |
 |---|---|---|
-| [`claude-code/`](implementations/claude-code/) | семь скиллов `/sdlc-*` + субагенты `sdlc-locator` (read-only разведка) и `sdlc-reviewer` (независимое ревью) для Claude Code | рабочая, прогнана end-to-end |
+| [`claude-code/`](implementations/claude-code/) | восемь скиллов `/sdlc-*` (семь этапов + посев) + субагенты `sdlc-locator` (read-only разведка) и `sdlc-reviewer` (независимое ревью) для Claude Code | рабочая, прогнана end-to-end |
 
 Другие варианты — CI-пайплайн с ручными паузами, другой агентный харнесс, чек-листы в трекере —
 добавляются соседними директориями: методология одна, отличается только то, чем именно построены
@@ -42,20 +43,21 @@
 | Этап | Что появляется | Форма |
 |---|---|---|
 | _(до витка)_ | набор гейтов проекта | [`templates/gates.template.md`](templates/gates.template.md) |
-| 1. Цель | задача | [`templates/intent.template.md`](templates/intent.template.md) |
+| 1. Цель | задача + результат проверки готовности | [`templates/intent.template.md`](templates/intent.template.md), [`templates/readiness.template.md`](templates/readiness.template.md) |
 | 2. Разведка | отчёт разведки | [`templates/exploration-report.template.md`](templates/exploration-report.template.md) |
 | 3. Вопросы _(если были)_ | вопросы и ответы | [`templates/clarification-report.template.md`](templates/clarification-report.template.md) |
-| 4. План | план | [`templates/plan.template.md`](templates/plan.template.md) |
-| 5. Chunk | git diff и вывод тестов | — |
-| 6. Верификация | отчёт приёмки | [`templates/verification-report.template.md`](templates/verification-report.template.md) |
-| 7. Commit | коммит и передача контекста | [`templates/handoff.template.md`](templates/handoff.template.md) |
+| 4. План | план с записанным одобрением | [`templates/plan.template.md`](templates/plan.template.md) |
+| 5. Chunk | журнал chunk'а + git diff и вывод тестов попытки | [`templates/chunk-journal.template.md`](templates/chunk-journal.template.md) |
+| 6. Верификация | отчёт приёмки (по попытке) | [`templates/verification-report.template.md`](templates/verification-report.template.md) |
+| 7. Commit | коммит и передача контекста с записанной приёмкой | [`templates/handoff.template.md`](templates/handoff.template.md) |
 
 ## Чем это собирается
 
 Методология не про стек — она задаёт шаги, артефакты и гейты. Минимум, без которого виток
-не стартует: команда сборки, команда тестов, сверка diff со списком файлов из плана и проверка
-на обход тестов. Остальное включается поверх; чего ещё нет — живёт в долге набора с подписью.
+не стартует: команда сборки, команда тестов, сверка diff со списком файлов из плана, проверка
+на обход тестов и ревью независимым агентом. Остальное включается поверх; чего ещё нет — живёт в долге набора с подписью.
 
 Готовая сборка на Claude Code лежит в [`implementations/claude-code/`](implementations/claude-code/) —
-семь скиллов и два субагента, покрывающие все этапы, включая ревью с установкой опровергать
-на этапе 6.
+восемь скиллов и два субагента, покрывающие все этапы, включая ревью с установкой опровергать
+на этапе 6 и калибровку гейтов посевом. Для мелких правок есть лёгкий контур — `SDLC.md` →
+«Мелкий виток».

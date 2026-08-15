@@ -3,7 +3,9 @@
 > Заполненный пример по [`../templates/clarification-report.template.md`](../templates/clarification-report.template.md).
 > Этап 3. Задаёт агент, **отвечает человек**. Шаг состоялся, потому что разведка вскрыла развилки.
 
-- **Задача:** [`intent.md`](intent.md) (PAY-412) · **Разведка:** [`exploration-report.md`](exploration-report.md)
+- **Задача:** [`intent.md`](intent.md) (PAY-412) — повторный запрос с тем же ключом не создаёт
+  второй платёж
+- **Разведка:** [`exploration-report.md`](exploration-report.md)
 
 ## Вопросы и ответы
 

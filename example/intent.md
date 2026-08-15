@@ -1,9 +1,13 @@
 # Задача: PAY-412 — идемпотентность создания платежа
 
 > Заполненный пример по [`../templates/intent.template.md`](../templates/intent.template.md). Читать вместе с
-> [`exploration-report.md`](exploration-report.md), [`plan.md`](plan.md),
-> [`verification-report.md`](verification-report.md) и [`gates.md`](gates.md) — это один виток
-> от цели до приёмки.
+> [`readiness.md`](readiness.md), [`exploration-report.md`](exploration-report.md),
+> [`plan.md`](plan.md), [`chunk-1-journal.md`](chunk-1-journal.md),
+> [`verification-report-1-attempt-1.md`](verification-report-1-attempt-1.md) и
+> [`gates.md`](gates.md) — это один виток от цели до приёмки.
+
+- **Контур:** полный — четыре файла, меняется контракт ответа (код `200` на повторе), гонки
+- **Ветка витка:** `sdlc/PAY-412`
 
 ## Коротко
 
@@ -35,19 +39,22 @@
 
 ## Приёмочный лист
 
-| id | Пункт | Как проверить (процедура + критерий) | Шаги (Given-When-Then) |
-|---|-------|--------------------------------------|------------------------|
-| claim-1 | Повторный `POST /api/payments` с тем же `Idempotency-Key` и тем же телом возвращает код `200` | `PaymentIdempotencyIT.retryReturns200` — критерий: код ответа ровно `200` | Given платёж создан с ключом `K` · When тот же запрос с `K` повторён · Then ответ `200` |
-| claim-2 | Повторный запрос возвращает `paymentId` первого платежа | `PaymentIdempotencyIT.retryReturnsSameId` — критерий: `paymentId` в ответе равен `paymentId` первого ответа | Given платёж создан с `K`, ответ содержал `id=P1` · When запрос с `K` повторён · Then в ответе `id=P1` |
-| claim-3 | Повторный запрос не создаёт новую строку в `payments` | `PaymentIdempotencyIT.retryCreatesNoRow` — критерий: `count(payments)` после повтора равен значению до повтора | Given `count(payments) = 1` · When запрос с `K` повторён · Then `count(payments) = 1` |
-| claim-4 | Запрос без заголовка `Idempotency-Key` возвращает код `201` | `PaymentIdempotencyIT.noKeyReturns201` — критерий: код ответа ровно `201` | Given заголовка нет · When `POST /api/payments` · Then ответ `201` |
-| claim-5 | `[edge]` Запрос без заголовка не пишет ключей для этого endpoint'а | `PaymentIdempotencyIT.noKeyWritesNoKeyRow` — критерий: число строк таблицы ключей с `endpoint = 'POST /api/payments'` после двух запросов подряд равно значению до них | Given заголовка нет · When два запроса подряд · Then строк с этим endpoint'ом столько же, сколько было |
-| claim-6 | `[edge]` Тот же `Idempotency-Key` с другим телом возвращает код `409` | `PaymentIdempotencyIT.sameKeyOtherBodyReturns409` — критерий: код ответа ровно `409` | Given платёж создан с `K` и суммой 100 · When запрос с `K` и суммой 200 · Then ответ `409` |
-| claim-7 | `[edge]` Тот же ключ с другим телом не создаёт платёж | `PaymentIdempotencyIT.sameKeyOtherBodyCreatesNoPayment` — критерий: `count(payments)` не изменился | Given платёж создан с `K` и суммой 100 · When запрос с `K` и суммой 200 · Then `count(payments)` тот же |
-| claim-8 | `[edge]` Два одновременных запроса с одним ключом создают ровно один платёж | `PaymentIdempotencyIT.concurrentCreatesOnePayment` (2 потока, PostgreSQL) — критерий: `count(payments) = 1` | Given два потока с ключом `K` · When оба отправляют запрос одновременно · Then `count(payments) = 1` |
-| claim-9 | `[edge]` Проигравший в гонке поток получает код `200` | тот же тест, второй ассерт — критерий: код ответа проигравшего ровно `200` | Given два потока с `K` · When первый закоммитился раньше · Then второй получил `200` |
-| claim-10 | `[edge]` Проигравший в гонке получает `paymentId` победителя | тот же тест, третий ассерт — критерий: `paymentId` проигравшего равен `paymentId` победителя | Given два потока с `K` · When первый закоммитился раньше · Then `paymentId` совпадает |
-| claim-11 | `[edge]` При гонке `PaymentCreatedEvent` публикуется ровно один раз | `PaymentIdempotencyIT.concurrentPublishesEventOnce` — критерий: число перехваченных `PaymentCreatedEvent` с этим `paymentId` равно одному | Given два потока с `K` и подписчик, считающий события · When оба отправляют запрос одновременно · Then перехвачено ровно одно событие |
+| id | Пункт | Как проверить (процедура + критерий) |
+|---|-------|--------------------------------------|
+| claim-1 | Повторный `POST /api/payments` с тем же `Idempotency-Key` и тем же телом возвращает код `200` | `PaymentIdempotencyIT.retryReturns200` — критерий: код ответа ровно `200` |
+| claim-2 | Повторный запрос возвращает `paymentId` первого платежа | `PaymentIdempotencyIT.retryReturnsSameId` — критерий: `paymentId` в ответе равен `paymentId` первого ответа |
+| claim-3 | Повторный запрос не создаёт новую строку в `payments` | `PaymentIdempotencyIT.retryCreatesNoRow` — критерий: `count(payments)` после повтора равен значению до повтора |
+| claim-4 | Запрос без заголовка `Idempotency-Key` возвращает код `201` | `PaymentIdempotencyIT.noKeyReturns201` — критерий: код ответа ровно `201` |
+| claim-5 | `[edge]` Запрос без заголовка не пишет ключей для этого endpoint'а | `PaymentIdempotencyIT.noKeyWritesNoKeyRow` — критерий: число строк таблицы ключей с `endpoint = 'POST /api/payments'` после двух запросов подряд равно значению до них |
+| claim-6 | `[edge]` Тот же `Idempotency-Key` с другим телом возвращает код `409` | `PaymentIdempotencyIT.sameKeyOtherBodyReturns409` — критерий: код ответа ровно `409` |
+| claim-7 | `[edge]` Тот же ключ с другим телом не создаёт платёж | `PaymentIdempotencyIT.sameKeyOtherBodyCreatesNoPayment` — критерий: `count(payments)` не изменился |
+| claim-8 | `[edge]` Два одновременных запроса с одним ключом создают ровно один платёж | `PaymentIdempotencyIT.concurrentCreatesOnePayment` — Given два потока с ключом `K` · When оба шлют запрос одновременно (реальный PostgreSQL) · Then `count(payments) = 1` |
+| claim-9 | `[edge]` Проигравший в гонке поток получает код `200` | тот же тест, второй ассерт — Given два потока с `K` · When первый закоммитился раньше · Then код ответа проигравшего ровно `200` |
+| claim-10 | `[edge]` Проигравший в гонке получает `paymentId` победителя | тот же тест, третий ассерт — критерий: `paymentId` проигравшего равен `paymentId` победителя |
+| claim-11 | `[edge]` При гонке `PaymentCreatedEvent` публикуется ровно один раз | `PaymentIdempotencyIT.concurrentPublishesEventOnce` — Given подписчик-счётчик · When два потока с `K` одновременно · Then перехвачено ровно одно событие с этим `paymentId` |
+
+_Отдельной колонки Given-When-Then нет: для одношаговых пунктов она пересказывала бы процедуру
+третий раз. Многошаговым сценариям гонки шаги вписаны прямо в «Как проверить»._
 
 ## Инварианты
 
@@ -58,14 +65,10 @@
 
 ## Когда остановиться и спросить
 
+_Только проектные условия; общие точки остановки — норма `SDLC.md`, сюда не переписываются._
+
 - Потребовалось тронуть `common/idempotency` или схему таблицы ключей — остановиться и спросить:
   механизм общий с заказами, и его правка задевает чужой домен
-- Затронут файл вне «Что придётся тронуть» — уточнить у человека
-- Блокирующий открытый вопрос не закрыт — не начинать chunk
-- Падает тест, причина которого не в текущих изменениях — эскалировать
-- Потребовалось изменить «Чего не делаем» — виток заново с новой задачей
-- Один и тот же гейт падает **на разных задачах** — общая причина: остановиться и править систему,
-  а не текущий chunk
 
 ## Что придётся тронуть
 

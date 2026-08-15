@@ -31,9 +31,10 @@ DEFAULT_BUDGET = "3"  # норма SDLC.md → этап 6; шаблон журн
 
 ATTEMPT_ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.M)
 # [^0-9\n] — не перескакивать на цифры следующих строк (номер попытки из таблицы)
-BUDGET_RE = re.compile(r"Бюджет попыток:\*?\*?[^0-9\n]*(\d+)")
+BUDGET_RE = re.compile(r"Бюджет попыток\*{0,2}:\*{0,2}[^0-9\n‹]*(\d+)")
 # \b(?!\s*/) — принять «retry — причина…», отвергнуть заготовку «continue / retry / escalate»
-ACTION_RE = re.compile(r"\*\*action:\*\*\s*(continue|retry|escalate)\b(?!\s*/)", re.M)
+ACTION_RE = re.compile(
+    r"\*\*action:\*\*\s*(continue|retry|escalate)\b(?!\s*/\s*(?:continue|retry|escalate))", re.M)
 ENABLED_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да(?: — минимум)?\s*\|\s*этап 6\s*\|", re.M)
 MANDATORY_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да — минимум\s*\|", re.M)
 
@@ -64,7 +65,10 @@ def strip_literal_spans(line: str) -> str:
 
 
 def holes_in(text: str):
-    """Строки с настоящими ‹…›: вне кода, вне цитат-упоминаний, вне fenced-блоков."""
+    """Строки с настоящими ‹…›: вне кода, вне цитат-упоминаний, вне fenced-блоков.
+
+    Осознанные слепые зоны механики (дыры там остаются рецензенту — норма в SDLC.md
+    и чек-листе sdlc-reviewer): ‹…› внутри «ёлочек» и внутри fenced-блоков ```…```."""
     holes, fenced = [], False
     for ln in text.splitlines():
         if ln.lstrip().startswith("```"):
@@ -88,14 +92,22 @@ def plan_approved(plan: str) -> bool:
     «не одобрен — вернуться после 2026-08-20» — НЕ одобрен, дата в причине не спасает;
     «Тест-Оператор · 2026-08-15 · источник: файл ответов» — одобрен.
     """
-    value = approval_line(plan).split("**Одобрение:**", 1)[-1].split(" / ")[0]
+    raw = approval_line(plan).split("**Одобрение:**", 1)[-1]
+    # отрезаем только хвост заготовки «/ **не одобрен — …**» (пробелы вокруг слэша любые);
+    # слэш внутри значения («Иван / Оператор») не трогаем
+    value = re.split(r"\s*/\s*\*\*не одобрен", raw)[0]
     if "не одобрен" in value:
         return False
     return bool(re.search(r"20\d\d", value)) or "источник: файл ответов" in value
 
 
 def attempt_nums(journal: str):
-    return [int(k) for k in ATTEMPT_ROW.findall(journal or "")]
+    nums = []
+    for ln in (journal or "").splitlines():
+        m = ATTEMPT_ROW.match(ln)
+        if m and PLACEHOLDER not in strip_literal_spans(ln):  # заготовка шаблона — не попытка
+            nums.append(int(m.group(1)))
+    return nums
 
 
 def budget_of(journal: str) -> str:
@@ -116,8 +128,8 @@ def readiness_verdict(readiness: str, n: int) -> str:
 
 def readiness_ok(readiness: str, n: int) -> bool:
     v = readiness_verdict(readiness, n).lower()
-    # заготовка «готова / не готова — ‹…›» не считается решением
-    return v.startswith("готова") and "не готова" not in v
+    # «✅ готова» — ок; «не готова…» и заготовка «готова / не готова — ‹…›» — нет
+    return "готова" in v and "не готова" not in v
 
 
 def journal_chunk_num(p: Path):
@@ -129,14 +141,12 @@ def gate_row_in(report: str, gate: str) -> bool:
     return re.search(rf"^\|\s*{re.escape(gate)}\s*\|", report, flags=re.M) is not None
 
 
-def parse_date(s):
-    m = re.search(r"(\d{4}-\d{2}-\d{2})", s or "")
-    return m.group(1) if m else None
-
-
 def mandatory_gates(gates: str):
+    """Минимум = канонический фолбэк ∪ пометки набора: пометка расширяет минимум,
+    но снятая с канонической строки пометка НЕ выводит её из-под проверки —
+    иначе проверка самореферентна (список из проверяемого же файла)."""
     marked = [g.strip() for g in MANDATORY_ROW.findall(gates or "")]
-    return marked or MANDATORY_FALLBACK
+    return sorted(set(marked) | set(MANDATORY_FALLBACK))
 
 
 def md_sections(text: str):
@@ -151,14 +161,16 @@ def claims_in(text):
 
 def do_print(what: str, root: Path, slug: str) -> int:
     d = root / ".sdlc" / slug
-    journals = natsorted(d.glob("chunk-*-journal.md"))
-    j = read(journals[-1]) if journals else None
-    if what == "budget":
-        print(budget_of(j))
-    elif what == "attempts":
-        print(len(attempt_nums(j)))
-    elif what == "chunk":
-        print(journal_chunk_num(journals[-1]) or "1" if journals else "1")
+    if what in ("budget", "attempts", "chunk"):
+        journals = natsorted(d.glob("chunk-*-journal.md"))
+        j = read(journals[-1]) if journals else None
+        if what == "budget":
+            print(budget_of(j))
+        elif what == "attempts":
+            print(len(attempt_nums(j)))
+        else:
+            num = journal_chunk_num(journals[-1]) if journals else None
+            print(num or "1")
     elif what == "action":
         reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
         print(action_of(read(reports[-1]) if reports else ""))
@@ -186,7 +198,10 @@ class Verdict:
         self.failed.append((check, detail, improvement))
 
     def check(self, cond, name, detail, improvement):
-        (self.ok if cond else lambda n: self.fail(n, detail, improvement))(name)
+        if cond:
+            self.ok(name)
+        else:
+            self.fail(name, detail, improvement)
 
 
 def main(root: Path, slug: str, at: str = "handoff") -> int:
@@ -248,7 +263,8 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 "приёмка человеком не фиксируется — чинить /sdlc-handoff Phase 1")
     for p in journals:
         j = texts.get(p.name) or ""
-        sig = j.split("Подтвердил:")[1][:80] if "Подтвердил:" in j else ""
+        sig_line = next((ln for ln in j.splitlines() if "Подтвердил:" in ln), "")
+        sig = sig_line.split("Подтвердил:", 1)[-1]
         v.check(bool(sig) and PLACEHOLDER not in strip_literal_spans(sig),
                 f"место правки подтверждено ({p.name})", "секция «Место правки» без подписи",
                 "подтверждение места правки не записывается — чинить /sdlc-chunk Phase 2")
@@ -270,6 +286,9 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         nums = attempt_nums(j)
         v.check(bool(nums), f"в журнале chunk-{n} есть строки попыток",
                 "таблица «Попытки» пуста", "счёт попыток не ведётся")
+        v.check(nums == list(range(1, len(nums) + 1)),
+                f"нумерация попыток chunk-{n} непрерывна", f"номера: {nums}",
+                "дыра или дубль в номерах — затёртая/пропавшая попытка невидима")
         for k in nums:  # по фактическим номерам из таблицы, не по range
             v.check((d / f"chunk-{n}-attempt-{k}-diff.patch").exists(),
                     f"diff chunk-{n} попытки {k} сохранён", "файла нет",
@@ -308,12 +327,13 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         for g in mandatory_gates(gates):
             v.check(bool(re.search(
                         rf"^\|\s*{re.escape(g)}\s*\|\s*да(?: — минимум)?\s*\|", gates, flags=re.M)),
-                    f"минимум: «{g}» включён", "строка не «да»",
+                    f"минимум: «{g}» включён", "строка не «да» / «да — минимум»",
                     "обязательный минимум выключен среди витка — набор не собран")
     if gates and last_report:
         enabled = [m.strip() for m in ENABLED_ROW.findall(gates)]
         header = next((ln for ln in last_report.splitlines() if "Набор гейтов:" in ln), "")
-        report_gates_date = parse_date(header)
+        _m = re.search(r"(\d{4}-\d{2}-\d{2})", header)
+        report_gates_date = _m.group(1) if _m else None
         v.check(bool(report_gates_date), "дата набора в шапке отчёта читается",
                 f"строка шапки: {header.strip()[:60] or 'отсутствует'}",
                 "без даты набора нельзя отличить гейт, введённый после отчёта")
@@ -331,7 +351,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
             late = bool(report_gates_date) and (
                 date > report_gates_date
                 or (date == report_gates_date
-                    and re.search(rf"\b{re.escape(slug)}\b", reason)))
+                    and re.search(rf"(?<![\w-]){re.escape(slug)}(?![\w-])", reason)))
             if late and not gate_row_in(last_report, g):
                 v.ok(f"гейт «{g}» включён после отчёта ({date}) — строка не требуется")
                 continue

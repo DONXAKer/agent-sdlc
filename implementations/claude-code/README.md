@@ -38,7 +38,7 @@
 | 3 | `/sdlc-ask <slug>` | **только если** разведка или задача вскрыли развилки; нет развилок — шаг пропускается без артефакта | `intent.md`, `exploration-report.md` | `clarification-report.md` | ответы на развилки через `AskUserQuestion` |
 | 4 | `/sdlc-plan <slug>` | после разведки (и вопросов, если были) | `intent.md`, `readiness.md`, `exploration-report.md` | `plan.md` с заполненным полем «Одобрение», `readiness.md` (прогон 2) | **одобрение плана** — имя и дата в поле файла |
 | 5 | `/sdlc-chunk <slug>` | после одобренного плана; повторно — по `retry_instruction` с этапа 6 | `plan.md` с одобрением | `chunk-N-journal.md`, `chunk-N-attempt-K-diff.patch`, `chunk-N-attempt-K-tests.txt` | подтверждение места правки после read-only разведки `sdlc-locator` |
-| 6 | `/sdlc-verify <slug>` | после каждой попытки chunk'а | diff и вывод тестов попытки | `verification-report-N-attempt-K.md` | нет (эскалация — только если бюджет попыток исчерпан) |
+| 6 | `/sdlc-verify <slug> [<n>]` | после каждой попытки chunk'а | diff и вывод тестов попытки | `verification-report-N-attempt-K.md` | нет (эскалация — только если бюджет попыток исчерпан) |
 | 7 | `/sdlc-handoff <slug>` | при `passed=true` в отчёте верификации — или при любом обрыве витка раньше | последний `verification-report-*` (при обрыве — что есть) | `handoff.md` с полем «Приёмка», локальный коммит | **приёмка вердикта** и решение о публикации (push/PR — человек) |
 
 Развилки цикла:

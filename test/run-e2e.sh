@@ -35,6 +35,8 @@ echo "run dir: $RUN · slug: $SLUG · resume: $RESUME"
 # --- рабочая копия fixture + git (пропускается при RESUME) --------------------------------------
 if [ "$RESUME" != "1" ]; then
   cp -R "$REPO/test/fixture/." "$RUN/"
+  # кэш-мусор из рабочей копии fixture (после make test) не тащим в baseline-коммит
+  find "$RUN" \( -name __pycache__ -type d \) -prune -exec rm -rf {} + 2>/dev/null || true
   cp "$TASK_FILE" "$RUN/TASK.md"
   cp "$ANSWERS_FILE" "$RUN/ANSWERS.md"
   mkdir -p "$RUN/.claude"
@@ -83,6 +85,9 @@ main_flow() {
   if ! { [ "$RESUME" = "1" ] && [ -s "$D/exploration-report.md" ]; }; then
     stage 2-explore "/sdlc-explore $SLUG" || return 1
   fi
+  # Прокси-предикат: артефакт самого этапа 3 условный (нет развилок — файла законно нет),
+  # поэтому «этапы 3–4 дошли до конца» надёжнее всего виден по вердикту прогона 2 (его пишет
+  # этап 4). При «не готова» перегон 3-ask безвреден: ask условный и идемпотентный.
   if ! { [ "$RESUME" = "1" ] && [ "$(pv readiness2)" = "yes" ]; }; then
     stage 3-ask "/sdlc-ask $SLUG" || return 1
   fi
@@ -100,19 +105,27 @@ main_flow() {
       continue) break ;;
       escalate) echo "ЭСКАЛАЦИЯ после попытки $n — handoff оформит обрыв"; break ;;
       retry|none)
-        b=$(pv budget) || { ABORTED="pv-сбой"; return 1; }
-        if [ "$n" -ge "$b" ]; then
-          echo "бюджет попыток ($b) исчерпан (action=$act) — handoff оформит обрыв"
-          break
-        fi
+        # мусорный отчёт распознаётся ДО проверки бюджета — иначе на последней попытке
+        # «отчёт-без-action» маскировался бы под штатное исчерпание бюджета
         if [ "$act" = "none" ] && [ "$(reports_count)" -gt 0 ]; then
           echo "последний отчёт приёмки без валидного action — останов"
           ABORTED="отчёт-без-action"
           return 1
         fi
-        local k=$((n + 1)) before after ch
-        stage "5-chunk-attempt-$k"  "/sdlc-chunk $SLUG" || return 1
+        b=$(pv budget) || { ABORTED="pv-сбой"; return 1; }
+        if [ "$n" -ge "$b" ]; then
+          echo "бюджет попыток ($b) исчерпан (action=$act) — handoff оформит обрыв"
+          break
+        fi
+        local k=$((n + 1)) before after ch n2
         before=$(reports_count)
+        stage "5-chunk-attempt-$k"  "/sdlc-chunk $SLUG" || return 1
+        n2=$(pv attempts) || { ABORTED="pv-сбой"; return 1; }
+        if [ "$n2" -le "$n" ]; then
+          echo "chunk отработал, но строка попытки в журнале не прибавилась ($n → $n2) — останов"
+          ABORTED="chunk-без-строки-попытки"
+          return 1
+        fi
         ch=$(pv chunk) || { ABORTED="pv-сбой"; return 1; }
         stage "6-verify-attempt-$k" "/sdlc-verify $SLUG $ch" || return 1
         after=$(reports_count)

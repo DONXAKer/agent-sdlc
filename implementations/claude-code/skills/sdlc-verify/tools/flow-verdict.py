@@ -414,6 +414,27 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         v.check(bool(re.search(r"\*\*passed:\*\*", last_report)), "вердикт в отчёте",
                 "поля **passed:** нет", "вердикт не посчитан")
 
+    # --- 6b. Вердикт согласован со статусами таблиц отчёта --------------------------------------
+    # Единственное правило, ради которого существует этап 6 (SDLC.md → таблица вердикта), само
+    # никогда не проверялось механически: passed=true проходило и при ❌/⚠ в таблицах отчёта.
+    if last_report:
+        m = re.search(r"\*\*passed:\*\*\s*(true|false)", last_report)
+        claimed = m.group(1) if m else None
+        rows = [ln for ln in last_report.splitlines() if ln.strip().startswith("|")]
+        bad_rows = [ln for ln in rows if re.search(r"\|\s*[❌⚠]\s*\|", ln)]
+        skipped_rows = [ln for ln in rows if re.search(r"\|\s*⏭\s*\|", ln)]
+        # «строк неприменимости нет» — буквальная фраза шаблона для пустой таблицы неприменимости;
+        # её отсутствие означает, что хотя бы одна строка неприменимости подписана человеком
+        has_inapplicability = "строк неприменимости нет" not in last_report
+        unexcused_skips = skipped_rows and not has_inapplicability
+        v.check(not (claimed == "true" and (bad_rows or unexcused_skips)),
+                "passed согласован со статусами таблиц",
+                f"passed=true при {len(bad_rows)} строк(е) ❌/⚠"
+                + (f" и {len(skipped_rows)} строк(е) ⏭ без подписанной неприменимости"
+                   if unexcused_skips else ""),
+                "главное правило вердикта (SDLC.md → этап 6, таблица) не проверялось "
+                "механически — passed=true могло стоять рядом с непройденным гейтом или пунктом")
+
     # --- 7. Scope: .sdlc не в files_to_touch ----------------------------------------------------
     if plan:
         section = next((s for s in md_sections(plan) if s.startswith("files_to_touch")), "")

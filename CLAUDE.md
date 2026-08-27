@@ -16,8 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **`SDLC.md`** — вся методология одним файлом: семь этапов, гейты, вердикт, словарь терминов. Первоисточник; остальные файлы должны с ним сходиться.
 - **`templates/`** — **канонические** шаблоны артефактов витка, все девять: intent, readiness, exploration-report, clarification-report, plan, chunk-journal, verification-report, handoff, gates.
-- **`implementations/claude-code/`** — рабочая реализация: восемь скиллов `/sdlc-intent` … `/sdlc-handoff` + `/sdlc-seed` (`skills/*/SKILL.md`) и два субагента с урезанными правами (`agents/sdlc-locator.md` — read-only разведка, `agents/sdlc-reviewer.md` — независимое ревью).
+- **`implementations/claude-code/`** — рабочая реализация: девять скиллов `/sdlc-intent` … `/sdlc-handoff` + `/sdlc-seed` + `/sdlc-retro` (`skills/*/SKILL.md`) и три субагента с урезанными правами (`agents/sdlc-locator.md` — read-only разведка, `agents/sdlc-reviewer.md` — независимое ревью, `agents/sdlc-methodologist.md` — независимый разбор методологии для `/sdlc-retro`).
 - **`example/`** — заполненные артефакты одного реального витка (Java/Spring). Виток **намеренно не принят** (ревью нашло дефект) — это часть примера, не ошибка. Артефактов этапа 5 (diff, вывод тестов) в примере нет намеренно: они порождаются кодовой базой витка.
+- **`retros/`** — отчёты `/sdlc-retro` (ретроспектива методологии, вне витка); появляется при первом запуске скилла, не заводится заранее. Правки методологии, вышедшие из триажа отчёта, вносятся отдельно человеком — скилл сам `SDLC.md`/`SKILL.md`/шаблоны не редактирует.
 
 ## Правила правок (сквозные инварианты)
 

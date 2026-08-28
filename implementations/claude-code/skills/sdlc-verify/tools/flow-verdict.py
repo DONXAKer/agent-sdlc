@@ -182,6 +182,25 @@ def gate_row_in(report: str, gate: str) -> bool:
     return re.search(rf"^\|\s*{re.escape(gate)}\s*\|", report, flags=re.M) is not None
 
 
+def row_has_status(ln: str, glyphs: str) -> bool:
+    """True if any `|`-delimited cell of this table row is a status cell showing one
+    of `glyphs` (e.g. "❌⚠" or "⏭").
+
+    Живые отчёты оборачивают статус в bold (`**❌**`) и иногда несут аннотацию рядом
+    (`⚠ частично`, `⚠️` с variation selector U+FE0F) — точное совпадение «только пробелы
+    и символ» ловит форму из шаблона, но не эти реальные варианты (нашлось построчной
+    сверкой с `.sdlc/AUTH-103/verification-report-1-attempt-4.md:19` и
+    `.sdlc/AUTH-102/verification-report-1-attempt-3.md:30`). Сверяем по первому
+    непробельному символу ячейки после снятия `*`/variation selector — тот же компромисс
+    (ложноотрицательный экзотический формат вместо ложноположительного совпадения
+    в прозе), что `holes_in()` уже принимает для сканирования плейсхолдеров."""
+    for cell in ln.split("|"):
+        c = cell.strip().strip("*").strip().replace("️", "")
+        if c and c[0] in glyphs:
+            return True
+    return False
+
+
 def mandatory_gates(gates: str):
     """Минимум = канонический фолбэк ∪ пометки набора: пометка расширяет минимум,
     но снятая с канонической строки пометка НЕ выводит её из-под проверки —
@@ -421,11 +440,12 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         m = re.search(r"\*\*passed:\*\*\s*(true|false)", last_report)
         claimed = m.group(1) if m else None
         rows = [ln for ln in last_report.splitlines() if ln.strip().startswith("|")]
-        bad_rows = [ln for ln in rows if re.search(r"\|\s*[❌⚠]\s*\|", ln)]
-        skipped_rows = [ln for ln in rows if re.search(r"\|\s*⏭\s*\|", ln)]
-        # «строк неприменимости нет» — буквальная фраза шаблона для пустой таблицы неприменимости;
-        # её отсутствие означает, что хотя бы одна строка неприменимости подписана человеком
-        has_inapplicability = "строк неприменимости нет" not in last_report
+        bad_rows = [ln for ln in rows if row_has_status(ln, "❌⚠")]
+        skipped_rows = [ln for ln in rows if row_has_status(ln, "⏭")]
+        # «строк неприменимости нет» — фраза шаблона для пустой таблицы неприменимости; регистр
+        # и bold-обёртка варьируются в живых отчётах («**Строк неприменимости нет.**» —
+        # .sdlc/AUTH-102/verification-report-1-attempt-3.md:30), сверка регистронезависимая
+        has_inapplicability = not re.search(r"строк\s+неприменимости\s+нет", last_report, re.I)
         unexcused_skips = skipped_rows and not has_inapplicability
         v.check(not (claimed == "true" and (bad_rows or unexcused_skips)),
                 "passed согласован со статусами таблиц",

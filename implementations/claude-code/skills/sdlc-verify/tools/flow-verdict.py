@@ -13,6 +13,9 @@
     печатает одно значение для оркестраторов (раннер e2e) — единственный парсер артефактов;
     `all` печатает все значения разом строками key=value (один субпроцесс на итерацию раннера);
     и --print, и вердикт зовут ОДНИ И ТЕ ЖЕ хелперы разбора, форматы не расходятся.
+  python3 flow-verdict.py --metrics <корень проекта>
+    наблюдения по всем виткам проекта разом — вход /sdlc-retro, не гейт; код возврата
+    всегда 0, ничего не роняет (см. do_metrics).
 Код возврата: 0 — контракт цел / значение напечатано; 1 — есть провалы; 2 — неверный вызов.
 """
 
@@ -69,12 +72,21 @@ def strip_literal_spans(line: str) -> str:
     return line
 
 
+HOLE_RE = re.compile(r"‹[^›\n]*›")
+
+
 def holes_in(text: str):
     """Строки с настоящими ‹…›: вне кода, вне цитат-упоминаний, вне fenced-блоков.
 
     Осознанные слепые зоны механики: ‹…› внутри «ёлочек» и внутри fenced-блоков ```…```.
     Дыры там остаются ручной части гейта (норма в SDLC.md): верификатор этапа 6 пробегает
-    все артефакты витка, рецензент — свои четыре входных."""
+    все артефакты витка, рецензент — свои четыре входных.
+
+    Дыра засчитывается только парой ‹…›: голый ‹ без закрывающего › — упоминание самого
+    символа в прозе («„grep -c '‹'" находит незаполненные места»), а не незаполненное
+    место (P5, retros/2026-08-28-CV.md) — на CV `.sdlc/gates.md:47` такая ячейка без
+    обратных кавычек (намеренно, чтобы раннер её не исполнял) давала ложный провал
+    на всех витках проекта."""
     holes, fenced = [], False
     for ln in text.splitlines():
         if ln.lstrip().startswith("```"):
@@ -82,7 +94,7 @@ def holes_in(text: str):
             continue
         if fenced:
             continue
-        if PLACEHOLDER in strip_literal_spans(ln):
+        if HOLE_RE.search(strip_literal_spans(ln)):
             holes.append(ln)
     return holes
 
@@ -253,6 +265,61 @@ def do_print(what: str, root: Path, slug: str) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- --metrics для /sdlc-retro
+
+def do_metrics(root: Path) -> int:
+    """Наблюдения по всем виткам проекта. НЕ гейт: код возврата всегда 0, ничего не роняет —
+    это вход `/sdlc-retro`, а не проверка витка. Норматив из этих чисел не делается
+    (SDLC.md → «Долой лозунги и квоты» + Гудхарт): числа существуют, чтобы повтор одного
+    класса отказа был виден не только памяти человека между витками (P2, retros/
+    2026-08-28-CV.md — до этого режима методология не считала о себе ни одной цифры)."""
+    sdlc = root / ".sdlc"
+    if not sdlc.is_dir():
+        print("нет .sdlc/ — метрик считать не из чего")
+        return 0
+    rows = []
+    for d in sorted(p for p in sdlc.iterdir() if p.is_dir()):
+        if not (d / "intent.md").exists():
+            continue
+        journals = natsorted(d.glob("chunk-*-journal.md"))
+        reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
+        j = read(journals[-1]) if journals else None
+        nums = attempt_nums(j) if j else []
+        first_pass = next(
+            (k for k, p in enumerate(reports, 1)
+             if re.search(r"\*\*passed:\*\*\s*true", read(p) or "")), None)
+        ho = read(d / "handoff.md")
+        classes = [c.strip() for c in re.findall(r"^-\s*\*\*Класс:\*\*\s*(.+)", ho or "", re.M)]
+        rows.append(dict(
+            slug=d.name, attempts=len(nums), reports=len(reports),
+            budget=budget_of(j) if j else "-", passed_at=first_pass,
+            handoff=ho is not None, classes=classes,
+        ))
+    if not rows:
+        print("витков в .sdlc/ не найдено")
+        return 0
+    done = [r for r in rows if r["handoff"]]
+    first = [r for r in rows if r["passed_at"] == 1]
+    reached = [r for r in rows if r["passed_at"] is not None]
+    print(f"Витков: {len(rows)} · завершённых handoff'ом: {len(done)}")
+    print(f"Прошли verify с первой попытки: {len(first)}/{len(rows)}")
+    print(f"Дошли до passed=true вообще: {len(reached)}/{len(rows)}")
+    over = [r for r in rows if str(r["budget"]).isdigit() and r["attempts"] > int(r["budget"])]
+    print(f"Превысили бюджет попыток: {len(over)}/{len(rows)}"
+          f" ({', '.join(r['slug'] for r in over) or 'нет'})")
+    seen = {}
+    for r in rows:
+        for c in r["classes"]:
+            seen.setdefault(c, []).append(r["slug"])
+    repeated = {c: v for c, v in seen.items() if len(v) > 1}
+    print(f"Классов дефектов с полем «Класс»: {len(seen)} · "
+          f"повторившихся на ≥2 витках: {len(repeated)}")
+    for c, v in sorted(repeated.items()):
+        print(f"  ПОВТОР «{c}» — {', '.join(v)} → SDLC.md → «Когда дефект проскочил»: "
+              f"править систему, не случай")
+    return 0
+
+
 # ---------------------------------------------------------------- вердикт
 
 class Verdict:
@@ -382,7 +449,9 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 f"разница: {sorted(ci ^ cr)}",
                 "отчёт приёмки не покрывает лист 1:1")
     if intent:
-        rows = [ln for ln in intent.splitlines() if re.match(r"^\|\s*claim-\d+\s*\|", ln)]
+        # [^|]* после id: строка листа несёт тег в той же ячейке — «| claim-5 [edge] | …» —
+        # жёсткое \s*\| после id эти строки не матчило (B1, retros/2026-08-27-CV.md)
+        rows = [ln for ln in intent.splitlines() if re.match(r"^\|\s*claim-\d+\b[^|]*\|", ln)]
         # позиционно: | id | Пункт | Как проверить | … — пустая третья колонка не компенсируется
         # заполненной четвёртой (опциональной GWT-колонкой)
         cells = [[c.strip() for c in r.split("|")] for r in rows]
@@ -491,7 +560,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    at, mode = "handoff", None
+    at, mode, metrics = "handoff", None, False
     pos = []
     i = 0
     while i < len(args):
@@ -499,8 +568,15 @@ if __name__ == "__main__":
             at = args[i + 1]; i += 2
         elif args[i] == "--print" and i + 1 < len(args):
             mode = args[i + 1]; i += 2
+        elif args[i] == "--metrics":
+            metrics = True; i += 1
         else:
             pos.append(args[i]); i += 1
+    if metrics:
+        if len(pos) != 1:
+            print(__doc__)
+            sys.exit(2)
+        sys.exit(do_metrics(Path(pos[0])))
     if at not in ("verify", "handoff") or len(pos) != 2:
         print(__doc__)
         sys.exit(2)

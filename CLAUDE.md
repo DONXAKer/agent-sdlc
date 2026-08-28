@@ -35,6 +35,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./sync-templates.sh            # разлить корневые шаблоны в копии скиллов (после правки шаблона)
 ./sync-templates.sh --check    # только сверить (гейт для CI)
 make -C test/fixture test      # тесты fixture-планировщика (16 шт.)
+python3 test/run-corpus.py     # регрессионный корпус flow-verdict.py (секунды, без токенов) —
+                                # правка tools/flow-verdict.py без зелёного прогона не коммитится;
+                                # --update переписывает expected.txt, только после того как
+                                # расхождение объяснено в теле коммита
 test/run-e2e.sh [dir]          # полный e2e-прогон флоу (дорого: реальные сессии claude)
 python3 test/verdict.py <run-dir> <slug>   # механический контракт флоу по готовым артефактам
 ```

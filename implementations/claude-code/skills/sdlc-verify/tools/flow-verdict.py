@@ -182,20 +182,11 @@ def gate_row_in(report: str, gate: str) -> bool:
     return re.search(rf"^\|\s*{re.escape(gate)}\s*\|", report, flags=re.M) is not None
 
 
-def normalized_cells(ln: str):
-    """Непустые `|`-ячейки строки таблицы после снятия обрамления `*`/`` ` ``/`_`
-    и variation selector U+FE0F — общая нормализация для `row_has_status()` и для
-    прямого построчного разбора там, где нужно сверить сразу несколько наборов
-    глифов за один проход по ячейкам (см. main(), блок «6b»)."""
-    for cell in ln.split("|"):
-        c = cell.strip().strip("*`_").strip().replace("️", "")
-        if c:
-            yield c
-
-
-def row_has_status(ln: str, glyphs: str) -> bool:
-    """Строка таблицы несёт хотя бы одну `|`-ячейку со статусом из `glyphs`
-    (например, "❌⚠" или "⏭")?
+def row_glyphs(ln: str) -> set:
+    """Статусные глифы, которые несёт эта строка таблицы — первые непробельные
+    символы её `|`-ячеек после снятия обрамления `*`/`` ` ``/`_` и variation
+    selector U+FE0F (например `{"❌"}` или `{"⏭"}`); единственный источник этой
+    нормализации в файле — вызывай отсюда, не копируй тело.
 
     Живые отчёты оборачивают статус в bold (`**❌**`), в обратные кавычки (`` `⚠` ``,
     так же принято ссылаться на глиф в прозе — `.sdlc/AUTH-103/verification-report-
@@ -207,7 +198,12 @@ def row_has_status(ln: str, glyphs: str) -> bool:
     ячейки после снятия обрамления — тот же компромисс (ложноотрицательный экзотический
     формат вместо ложноположительного совпадения в прозе), что `holes_in()` уже
     принимает для сканирования плейсхолдеров."""
-    return any(c[0] in glyphs for c in normalized_cells(ln))
+    glyphs = set()
+    for cell in ln.split("|"):
+        c = cell.strip().strip("*`_").strip().replace("️", "")
+        if c:
+            glyphs.add(c[0])
+    return glyphs
 
 
 def mandatory_gates(gates: str):
@@ -451,10 +447,10 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         rows = [ln for ln in last_report.splitlines() if ln.strip().startswith("|")]
         bad_rows, skipped_rows = [], []
         for ln in rows:  # один проход по ячейкам строки на оба набора глифов сразу
-            cells = list(normalized_cells(ln))
-            if any(c[0] in "❌⚠" for c in cells):
+            glyphs = row_glyphs(ln)
+            if glyphs & set("❌⚠"):
                 bad_rows.append(ln)
-            if any(c[0] == "⏭" for c in cells):
+            if "⏭" in glyphs:
                 skipped_rows.append(ln)
         # «строк неприменимости нет» — фраза шаблона для пустой таблицы неприменимости; регистр
         # и bold-обёртка варьируются в живых отчётах («**Строк неприменимости нет.**» —

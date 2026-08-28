@@ -182,23 +182,32 @@ def gate_row_in(report: str, gate: str) -> bool:
     return re.search(rf"^\|\s*{re.escape(gate)}\s*\|", report, flags=re.M) is not None
 
 
-def row_has_status(ln: str, glyphs: str) -> bool:
-    """True if any `|`-delimited cell of this table row is a status cell showing one
-    of `glyphs` (e.g. "❌⚠" or "⏭").
-
-    Живые отчёты оборачивают статус в bold (`**❌**`) и иногда несут аннотацию рядом
-    (`⚠ частично`, `⚠️` с variation selector U+FE0F) — точное совпадение «только пробелы
-    и символ» ловит форму из шаблона, но не эти реальные варианты (нашлось построчной
-    сверкой с `.sdlc/AUTH-103/verification-report-1-attempt-4.md:19` и
-    `.sdlc/AUTH-102/verification-report-1-attempt-3.md:30`). Сверяем по первому
-    непробельному символу ячейки после снятия `*`/variation selector — тот же компромисс
-    (ложноотрицательный экзотический формат вместо ложноположительного совпадения
-    в прозе), что `holes_in()` уже принимает для сканирования плейсхолдеров."""
+def normalized_cells(ln: str):
+    """Непустые `|`-ячейки строки таблицы после снятия обрамления `*`/`` ` ``/`_`
+    и variation selector U+FE0F — общая нормализация для `row_has_status()` и для
+    прямого построчного разбора там, где нужно сверить сразу несколько наборов
+    глифов за один проход по ячейкам (см. main(), блок «6b»)."""
     for cell in ln.split("|"):
-        c = cell.strip().strip("*").strip().replace("️", "")
-        if c and c[0] in glyphs:
-            return True
-    return False
+        c = cell.strip().strip("*`_").strip().replace("️", "")
+        if c:
+            yield c
+
+
+def row_has_status(ln: str, glyphs: str) -> bool:
+    """Строка таблицы несёт хотя бы одну `|`-ячейку со статусом из `glyphs`
+    (например, "❌⚠" или "⏭")?
+
+    Живые отчёты оборачивают статус в bold (`**❌**`), в обратные кавычки (`` `⚠` ``,
+    так же принято ссылаться на глиф в прозе — `.sdlc/AUTH-103/verification-report-
+    1-attempt-4.md:45`), в курсив (`_❌_`) и иногда несут аннотацию рядом (`⚠ частично`,
+    `⚠️` с variation selector U+FE0F) — точное совпадение «только пробелы и символ»
+    ловит форму из шаблона, но не эти реальные варианты (нашлось построчной сверкой
+    с `.sdlc/AUTH-103/verification-report-1-attempt-4.md:19` и `.sdlc/AUTH-102/
+    verification-report-1-attempt-3.md:30`). Сверяем по первому непробельному символу
+    ячейки после снятия обрамления — тот же компромисс (ложноотрицательный экзотический
+    формат вместо ложноположительного совпадения в прозе), что `holes_in()` уже
+    принимает для сканирования плейсхолдеров."""
+    return any(c[0] in glyphs for c in normalized_cells(ln))
 
 
 def mandatory_gates(gates: str):
@@ -440,8 +449,13 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         m = re.search(r"\*\*passed:\*\*\s*(true|false)", last_report)
         claimed = m.group(1) if m else None
         rows = [ln for ln in last_report.splitlines() if ln.strip().startswith("|")]
-        bad_rows = [ln for ln in rows if row_has_status(ln, "❌⚠")]
-        skipped_rows = [ln for ln in rows if row_has_status(ln, "⏭")]
+        bad_rows, skipped_rows = [], []
+        for ln in rows:  # один проход по ячейкам строки на оба набора глифов сразу
+            cells = list(normalized_cells(ln))
+            if any(c[0] in "❌⚠" for c in cells):
+                bad_rows.append(ln)
+            if any(c[0] == "⏭" for c in cells):
+                skipped_rows.append(ln)
         # «строк неприменимости нет» — фраза шаблона для пустой таблицы неприменимости; регистр
         # и bold-обёртка варьируются в живых отчётах («**Строк неприменимости нет.**» —
         # .sdlc/AUTH-102/verification-report-1-attempt-3.md:30), сверка регистронезависимая

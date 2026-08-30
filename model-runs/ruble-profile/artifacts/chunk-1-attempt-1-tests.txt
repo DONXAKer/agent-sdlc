@@ -1,0 +1,106 @@
+# Запись рантайма о фактическом прогоне тестов этой попытки.
+# Составлена не исполнителем этапа: содержимое, записанное агентом, перезаписано.
+
+Команда: node --test "test/**/*.test.ts"
+Статус: ❌
+Код возврата: 1
+
+}
+
+## Вывод команды (хвост, записан рантаймом)
+
+▶ деньги
+  ✔ рубли переводятся в копейки без дробей (0.401833ms)
+  ✔ процент округляется половиной ВВЕРХ (0.055708ms)
+  ✔ процент от круглой суммы считается точно (0.04775ms)
+  ✔ вычитание не уходит ниже нуля (0.042333ms)
+  ✔ сумма печатается с разрядами и копейками (0.087125ms)
+✔ деньги (1.181042ms)
+▶ весовые ступени
+  ✔ границы включающие (0.383375ms)
+✔ весовые ступени (0.901375ms)
+▶ тарифная таблица
+  ✔ заполнена для всех зон и всех ступеней (0.070334ms)
+  ✔ цена растёт с весом внутри зоны (0.052167ms)
+  ✔ любой вес попадает в заполненную ступень (0.07175ms)
+✔ тарифная таблица (0.269917ms)
+▶ зоны
+  ✔ код региона определяет зону, неизвестный уходит в дальнюю (0.051917ms)
+✔ зоны (0.096291ms)
+▶ расчёт цены
+  ✖ разовое отправление считается по базе без скидки (1.756916ms)
+  ✖ скидка лояльности считается от базы зоны (0.141042ms)
+  ✔ дальняя зона берёт свой тариф (0.046042ms)
+✖ расчёт цены (2.050709ms)
+ℹ tests 13
+ℹ suites 5
+ℹ pass 11
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 127.138167
+
+✖ failing tests:
+
+test at test/tariffs.test.ts:72:3
+✖ разовое отправление считается по базе без скидки (1.756916ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      base: 24900,
+      discount: 0,
+  +   surcharge: 0,
+      total: 24900,
+      zone: 'msk'
+    }
+  
+      at TestContext.<anonymous> (file:///private/var/folders/sk/k4f53x5j0tl758s05k75mf100000gn/T/sdlc-bench-woDk3F/test/tariffs.test.ts:73:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at node:internal/test_runner/test:1617:71
+      at node:internal/per_context/primordials:466:82
+      at new Promise (<anonymous>)
+      at new SafePromise (node:internal/per_context/primordials:435:3)
+      at node:internal/per_context/primordials:466:9
+      at Array.map (<anonymous>) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { zone: 'msk', base: 24900, discount: 0, surcharge: 0, total: 24900 },
+    expected: { zone: 'msk', base: 24900, discount: 0, total: 24900 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at test/tariffs.test.ts:76:3
+✖ скидка лояльности считается от базы зоны (0.141042ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      base: 24900,
+      discount: 2988,
+  +   surcharge: 0,
+      total: 21912,
+      zone: 'msk'
+    }
+  
+      at TestContext.<anonymous> (file:///private/var/folders/sk/k4f53x5j0tl758s05k75mf100000gn/T/sdlc-bench-woDk3F/test/tariffs.test.ts:77:5)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Suite.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1619:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { zone: 'msk', base: 24900, discount: 2988, surcharge: 0, total: 21912 },
+    expected: { zone: 'msk', base: 24900, discount: 2988, total: 21912 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+

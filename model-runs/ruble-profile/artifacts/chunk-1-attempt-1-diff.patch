@@ -1,0 +1,59 @@
+diff --git a/src/oversize.ts b/src/oversize.ts
+new file mode 100644
+index 0000000..dcb2623
+--- /dev/null
++++ b/src/oversize.ts
+@@ -0,0 +1,36 @@
++/**
++ * Логика проверки негабаритности отправлений.
++ */
++
++import type { Dimensions } from './tariffs.ts';
++
++/**
++ * Проверка негабаритности отправления.
++ * @param dimensions Габариты отправления в сантиметрах.
++ * @returns true, если отправление негабаритное (сумма измерений > 300 см или наибольшая сторона > 120 см).
++ */
++export function isOversize(dimensions: Dimensions): boolean {
++  const longestSide = Math.max(dimensions[0], dimensions[1], dimensions[2]);
++  const dimensionSum = dimensions[0] + dimensions[1] + dimensions[2];
++  
++  return dimensionSum > 300 || longestSide > 120;
++}
++
++/**
++ * Расчет надбавки для негабаритных отправлений.
++ * @param basePrice Базовая цена зоны.
++ * @param dimensions Габариты отправления.
++ * @returns Надбавка в копейках.
++ */
++export function calculateSurcharge(basePrice: number, dimensions: Dimensions): number {
++  const isOversizeSum = dimensions.reduce((sum, dim) => sum + dim, 0) > 300;
++  const isOversizeSide = Math.max(dimensions[0], dimensions[1], dimensions[2]) > 120;
++  
++  if (isOversizeSum) {
++    return basePrice * 0.9; // 90% надбавка для суммы измерений > 300 см
++  } else if (isOversizeSide) {
++    return basePrice * 0.4; // 40% надбавка для наибольшей стороны > 120 см
++  }
++  
++  return 0; // Нет надбавки
++}
+\ No newline at end of file
+diff --git a/src/tariffs.ts b/src/tariffs.ts
+index 5ff6893..a2273af 100644
+--- a/src/tariffs.ts
++++ b/src/tariffs.ts
+@@ -14,0 +15,2 @@ import type { Zone } from './zones.ts';
++import { isOversize, calculateSurcharge } from './oversize.ts';
++import type { Dimensions } from './oversize.ts';
+@@ -116,0 +119,2 @@ export interface Quote {
++  /** Надбавка за негабаритность в копейках. */
++  surcharge?: Kopeck;
+@@ -154,2 +158,3 @@ export function priceFor(order: Order): Quote {
+-  const total = subtract(base, discount);
+-  return { zone, base, discount, total };
++  const surcharge = isOversize(order.dimensionsCm) ? calculateSurcharge(base, order.dimensionsCm) : 0;
++  const total = subtract(subtract(base, discount), surcharge);
++  return { zone, base, discount, surcharge, total };

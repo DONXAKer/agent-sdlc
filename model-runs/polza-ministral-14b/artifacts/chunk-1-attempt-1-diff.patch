@@ -1,0 +1,157 @@
+diff --git a/src/oversize.ts b/src/oversize.ts
+new file mode 100644
+index 0000000..5479347
+--- /dev/null
++++ b/src/oversize.ts
+@@ -0,0 +1,31 @@
++// Константы порогов и ставок для негабаритных отправлений
++const LENGTH_THRESHOLD_CM = 120;
++const SUM_THRESHOLD_CM = 300;
++const SMALL_SURCHARGE_PERCENT = 40;
++const LARGE_SURCHARGE_PERCENT = 90;
++
++/**
++ * Рассчитывает надбавку за негабарит.
++ * @param longestSideCm - наибольшая сторона в сантиметрах
++ * @param dimensionSumCm - сумма всех измерений в сантиметрах
++ * @param base - базовая цена в копейках
++ * @returns надбавка в копейках или undefined, если отправление в пределах габаритов
++ */
++export function oversizeSurcharge(longestSideCm: number, dimensionSumCm: number, base: number): number | undefined {
++    // Если оба условия не выполнены, надбавка не начисляется
++    if (longestSideCm <= LENGTH_THRESHOLD_CM && dimensionSumCm <= SUM_THRESHOLD_CM) {
++        return undefined;
++    }
++    
++    // Если сумма измерений строго больше 300 см, применяется ставка 90%
++    if (dimensionSumCm > SUM_THRESHOLD_CM) {
++        return Math.round(base * LARGE_SURCHARGE_PERCENT / 100);
++    }
++    
++    // Если только наибольшая сторона строго больше 120 см, применяется ставка 40%
++    if (longestSideCm > LENGTH_THRESHOLD_CM) {
++        return Math.round(base * SMALL_SURCHARGE_PERCENT / 100);
++    }
++    
++    return undefined;
++}
+\ No newline at end of file
+diff --git a/src/tariffs.ts b/src/tariffs.ts
+index 5ff6893..1c06dc8 100644
+--- a/src/tariffs.ts
++++ b/src/tariffs.ts
+@@ -11 +11,2 @@ import type { Customer } from './discounts.ts';
+-import { subtract } from './money.ts';
++import { subtract, add } from './money.ts';
++import { oversizeSurcharge } from './oversize.ts';
+@@ -116,0 +118,2 @@ export interface Quote {
++  /** Надбавка за негабарит в копейках. */
++  surcharge?: Kopeck;
+@@ -155 +158,8 @@ export function priceFor(order: Order): Quote {
+-  return { zone, base, discount, total };
++  const surcharge = oversizeSurcharge(longestSide(order.dimensionsCm), dimensionSum(order.dimensionsCm), base);
++  
++  if (surcharge !== undefined) {
++    const totalWithSurcharge = add(total, surcharge);
++    return { zone, base, discount, surcharge, total: totalWithSurcharge };
++  } else {
++    return { zone, base, discount, total };
++  }
+diff --git a/test/oversize.test.ts b/test/oversize.test.ts
+new file mode 100644
+index 0000000..f573184
+--- /dev/null
++++ b/test/oversize.test.ts
+@@ -0,0 +1,78 @@
++import { priceFor } from '../src/tariffs.ts';
++import type { Quote } from '../src/tariffs.ts';
++import { zoneOf } from '../src/zones.ts';
++import { strict as assert } from 'node:assert';
++const { deepStrictEqual, ok } = assert;
++
++/**
++ * Фикстура для тестов: отправление с заданными параметрами.
++ * @param params - параметры заказа
++ * @returns объект заказа
++ */
++function order(params: {
++  regionCode?: number;
++  weightG?: number;
++  dimensionsCm?: [number, number, number];
++  customer?: 'none' | 'silver' | 'gold';
++} = {}) {
++  return {
++    regionCode: params.regionCode ?? 1, // Москва по умолчанию
++    weightG: params.weightG ?? 500,
++    dimensionsCm: params.dimensionsCm ?? [20, 15, 10],
++    customer: params.customer ?? 'none',
++  };
++}
++
++function runTests() {
++  function testClaim1() {
++    const quote = priceFor(order());
++    deepStrictEqual(Object.keys(quote).sort(), ['base', 'discount', 'total', 'zone']);
++    deepStrictEqual(quote, {
++      zone: zoneOf(1),
++      base: 19_900,
++      discount: 0,
++      total: 19_900,
++    });
++  });
++
++  function testClaim2() {
++    const quote = priceFor(order({ dimensionsCm: [130, 50, 50] }));
++    ok(quote.surcharge === 7_960); // 40% от 19_900
++    ok(quote.total === 27_860); // 19_900 + 7_960
++  });
++
++  function testClaim3() {
++    const quote = priceFor(order({ dimensionsCm: [100, 100, 101] }));
++    ok(quote.surcharge === undefined);
++  });
++
++  function testClaim4() {
++    const quote = priceFor(order({ dimensionsCm: [150, 100, 60] }));
++    ok(quote.surcharge === 17_910); // 90% от 19_900
++    ok(quote.total === 37_810); // 19_900 + 17_910
++  });
++
++  function testClaim5() {
++    const quote = priceFor(order({ dimensionsCm: [120, 100, 80] }));
++    ok(quote.surcharge === undefined);
++  });
++
++  function testClaim6() {
++    const quote = priceFor(order({
++      dimensionsCm: [130, 50, 50],
++      customer: 'gold'
++    }));
++    ok(quote.surcharge === 7_960); // 40% от 19_900
++    ok(quote.total === 27_860 - 1_990); // 19_900 + 7_960 - 10% скидка
++  });
++
++  function testClaim7() {
++    const quote = priceFor(order({
++      regionCode: 14, // Зона far
++      weightG: 300,
++      dimensionsCm: [150, 50, 50]
++    }));
++    ok(quote.surcharge === 43_980); // 90% от 48_925
++    ok(quote.total === 48_925 + 43_980); // Базовая цена far + надбавка
++  });
++});
+\ No newline at end of file
+
+diff --git a/snapshot.json b/snapshot.json
+new file mode 100644
+index 0000000..c685739
+--- /dev/null
++++ b/snapshot.json
+@@ -0,0 +1,6 @@
++{
++  "slug": "bench-snap",
++  "branch": "sdlc/oversize",
++  "stoppedAfterStage": "plan",
++  "createdAt": "2026-08-29T12:49:34.582Z"
++}

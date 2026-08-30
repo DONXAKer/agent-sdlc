@@ -1,0 +1,74 @@
+# Запись рантайма о фактическом прогоне тестов этой попытки.
+# Составлена не исполнителем этапа: содержимое, записанное агентом, перезаписано.
+
+Команда: node --test "test/**/*.test.ts"
+Статус: ❌
+Код возврата: 1
+
+'test failed'
+
+## Вывод команды (хвост, записан рантаймом)
+
+▶ деньги
+  ✔ рубли переводятся в копейки без дробей (0.399541ms)
+  ✔ процент округляется половиной ВВЕРХ (0.050167ms)
+  ✔ процент от круглой суммы считается точно (0.038583ms)
+  ✔ вычитание не уходит ниже нуля (0.040709ms)
+  ✔ сумма печатается с разрядами и копейками (0.092542ms)
+✔ деньги (1.175875ms)
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+file:///private/var/folders/sk/k4f53x5j0tl758s05k75mf100000gn/T/sdlc-bench-snap-f5w0Xw/test/oversize.test.ts:36
+    });
+  });
+   ^
+
+SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected
+    at parseTypeScript (node:internal/modules/typescript:72:36)
+    at processTypeScriptCode (node:internal/modules/typescript:146:42)
+    at stripTypeScriptModuleTypes (node:internal/modules/typescript:209:22)
+    at ModuleLoader.<anonymous> (node:internal/modules/esm/translators:639:29)
+    at #translate (node:internal/modules/esm/loader:451:20)
+    at afterLoad (node:internal/modules/esm/loader:507:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:512:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:555:36)
+    at afterResolve (node:internal/modules/esm/loader:603:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:609:12) {
+  code: 'ERR_INVALID_TYPESCRIPT_SYNTAX'
+}
+
+Node.js v25.8.1
+✖ test/oversize.test.ts (95.656167ms)
+▶ весовые ступени
+  ✔ границы включающие (0.368ms)
+✔ весовые ступени (0.850375ms)
+▶ тарифная таблица
+  ✔ заполнена для всех зон и всех ступеней (0.079666ms)
+  ✔ цена растёт с весом внутри зоны (0.050334ms)
+  ✔ любой вес попадает в заполненную ступень (0.070792ms)
+✔ тарифная таблица (0.276791ms)
+▶ зоны
+  ✔ код региона определяет зону, неизвестный уходит в дальнюю (0.053542ms)
+✔ зоны (0.093292ms)
+▶ расчёт цены
+  ✔ разовое отправление считается по базе без скидки (0.691708ms)
+  ✔ скидка лояльности считается от базы зоны (0.053208ms)
+  ✔ дальняя зона берёт свой тариф (0.040584ms)
+✔ расчёт цены (0.88125ms)
+ℹ tests 14
+ℹ suites 5
+ℹ pass 13
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 119.158166
+
+✖ failing tests:
+
+test at test/oversize.test.ts:1:1
+✖ test/oversize.test.ts (95.656167ms)
+  'test failed'
+

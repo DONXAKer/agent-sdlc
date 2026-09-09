@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-sdlc.dev/schemas/agent-sdlc-state-v1.schema.json",
+  "title": "Agent-SDLC canonical run state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "slug", "stage", "claims", "gates", "attempts", "decisions", "verification"],
+  "properties": {
+    "schema_version": {"const": "agent-sdlc/state/v1"},
+    "slug": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "stage": {"enum": ["intent", "explore", "ask", "plan", "chunk", "verify", "handoff", "blocked"]},
+    "claims": {"type": "array", "items": {"$ref": "#/$defs/claim"}},
+    "gates": {"type": "array", "items": {"$ref": "#/$defs/gate"}},
+    "attempts": {"type": "array", "items": {"$ref": "#/$defs/attempt"}},
+    "decisions": {"type": "array", "items": {"$ref": "#/$defs/decision"}},
+    "verification": {"$ref": "#/$defs/verification"},
+    "migration": {"$ref": "#/$defs/migration"}
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "anchor": {"type": "string"}
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "verification"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^claim-[1-9][0-9]*$"},
+        "text": {"type": "string", "minLength": 1},
+        "verification": {"type": "string", "minLength": 1},
+        "tags": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "stage", "enabled", "status"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "stage": {"type": "integer", "minimum": 1, "maximum": 7},
+        "enabled": {"type": "boolean"},
+        "status": {"enum": ["passed", "failed", "skipped", "debt"]},
+        "result": {"type": "string"},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chunk", "number", "status"],
+      "properties": {
+        "chunk": {"type": "integer", "minimum": 1},
+        "number": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["open", "passed", "failed", "blocked_env", "escalated"]},
+        "diff": {"$ref": "#/$defs/evidence"},
+        "tests": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "by", "at", "value"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1},
+        "by": {"type": "string", "minLength": 1},
+        "at": {"type": "string", "format": "date-time"},
+        "value": {"type": "string", "minLength": 1}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "action", "review"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "action": {"enum": ["continue", "retry", "blocked_env", "escalate"]},
+        "retry_instruction": {"type": "string"},
+        "review": {"$ref": "verify-review-v1.schema.json"}
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "artifacts", "unresolved"],
+      "properties": {
+        "source": {"const": "legacy_markdown"},
+        "artifacts": {"type": "array", "items": {"type": "string"}},
+        "unresolved": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

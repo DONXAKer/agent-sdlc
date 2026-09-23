@@ -18,6 +18,10 @@
   Retry-цикл крутится до бюджета попыток из журнала chunk'а; все значения из артефактов читает
   единственный парсер `flow-verdict.py --print` (включая RESUME-предикаты); verify без нового
   отчёта — немедленный обрыв; обрыв любого этапа всё равно завершается handoff'ом и вердиктом.
+- `seed-flow-verdict.py` — самопосев в инструмент: инвертирует по одной проверке `v.check` в копии
+  `flow-verdict.py` и ждёт, что корпус покраснеет; выжившие мутанты — проверки без кейса, они
+  записываются долгом в `seed-flow-verdict.known.txt` (по одной строке, с причиной), новый
+  выживший без строки долга — красный итог.
 - `verdict.py` — тонкая обёртка совместимости над носителем логики
   `implementations/claude-code/skills/sdlc-verify/tools/flow-verdict.py` (инструмент скилла,
   исполняющий гейт «Сверка отчёта с набором»). Проверяется механический контракт флоу по
@@ -43,7 +47,15 @@ markdown-разметке (докстринги `row_glyphs()`/`plan_approved()`
 для каждого кейса в `flow-verdict-corpus/<case>/` (самодостаточный корень с `.sdlc/gates.md` +
 `.sdlc/<case>/*`) сверяет вывод `flow-verdict.py --at verify` с зафиксированным `expected.txt`.
 Правило то же, что и у любой проверки без кейса, — `SDLC.md` → «Когда дефект проскочил»: правка
-`tools/flow-verdict.py` без прогона этого корпуса не коммитится.
+`tools/flow-verdict.py` без прогона этого корпуса не коммитится. Кейсы: три исторических
+(`attempt-gap`, `gates-placeholder`, `passed-table-mismatch` — по находкам живых витков), зелёный
+эталон `green`, по кейсу на ветку вердикта (`plan-unapproved`, `skip-unexcused`, `sdlc-in-scope`,
+`gate-enabled-after-report`, `chunk-oversize`, `axes-outcome-dangling`, `axes-quoted-reason`,
+`review-md-ignored`), два кейса режима `--at handoff` (`handoff-green`, `handoff-two-loops`) и
+`example` — канонический пример репозитория, который не копируется в корпус, а материализуется из
+`example/` через `case.json` (`{"mode", "source", "slug"}`; `mode` — verify|handoff, `source` —
+каталог с плоскими артефактами). Что корпус НЕ ловит, показывает
+`python test/seed-flow-verdict.py --report`.
 
 ## Что считается провалом флоу, а не кода
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Синхронизация канонических шаблонов из templates/ в установочные копии скиллов.
+# Синхронизация канонических шаблонов templates/ и sdlc-constants.json в установочные копии скиллов.
 # Направление одно: корень → скиллы. Правка копии в скилле затирается — правь корень.
 # Запуск без аргументов копирует; `--check` только сверяет и падает при расхождении (для CI/гейта).
 set -euo pipefail
@@ -56,13 +56,19 @@ for dst in "$SKILLS"/*/templates/*.md; do
   fi
 done
 
-# --- умолчание бюджета попыток: DEFAULT_BUDGET кода обязан совпадать с шаблоном журнала ------
-code_budget=$(sed -n 's/^DEFAULT_BUDGET = "\([0-9]*\)".*/\1/p' \
-  implementations/claude-code/skills/sdlc-verify/tools/flow-verdict.py)
-tpl_budget=$(sed -n 's|.*/ \([0-9][0-9]*\) — умолчание.*|\1|p' templates/chunk-journal.template.md)
-if [[ -z "$code_budget" || "$code_budget" != "$tpl_budget" ]]; then
-  echo "РАЗОШЛОСЬ умолчание бюджета попыток: flow-verdict.py DEFAULT_BUDGET=«$code_budget» ↔ chunk-journal.template.md «$tpl_budget»"
-  fail=1
+# --- константы методологии: установочная копия для flow-verdict.py --------------------------
+# sdlc-constants.json — единственный источник имён и чисел; flow-verdict.py читает копию
+# рядом с собой (после install.sh корня репозитория у него нет). Умолчание бюджета попыток
+# и остальные числа с прозой сверяет tools/check-consistency.py, не этот скрипт.
+const_dst=implementations/claude-code/skills/sdlc-verify/tools/sdlc-constants.json
+if [[ "$mode" == "--check" ]]; then
+  if ! diff -q sdlc-constants.json "$const_dst" >/dev/null 2>&1; then
+    echo "РАЗОШЛОСЬ: sdlc-constants.json ↔ $const_dst"
+    fail=1
+  fi
+else
+  cp sdlc-constants.json "$const_dst"
+  echo "→ $const_dst"
 fi
 
 if [[ "$mode" == "--check" ]]; then

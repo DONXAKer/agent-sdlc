@@ -1,7 +1,7 @@
 # Реализация: Claude Code (скиллы + агенты)
 
 Семь этапов [методологии](../../SDLC.md), собранные как скиллы Claude Code, плюс скилл посева,
-скилл ретроспективы методологии и три субагента с урезанными правами — там, где методология
+скилл ретроспективы методологии и четыре субагента с урезанными правами — там, где методология
 требует, чтобы ограничение было конструкцией, а не инструкцией.
 
 ## Установка
@@ -14,6 +14,21 @@
                       # синхронизирует: удалённые файлы и целые сущности не выживают,
                       # кэш-мусор (__pycache__, .DS_Store, *.pyc) вычищается
 ./install.sh --check  # только сверить (включая сирот), exit 1 при расхождении
+```
+
+Вместе со скиллами и агентами ставится hook `~/.claude/hooks/sdlc-guard.py`. Он держит две границы
+конструкцией, пока в `.sdlc/<slug>/` лежит маркер: `.scope.json` — Write/Edit только в
+`files_to_touch` (гейт «Граница scope hook'ом», этап 5); `.review-lock` — на время ревью этапа 6
+закрыты инструменты записи вне `.sdlc/` и штатные мутирующие команды оболочки; `.claims-lock` —
+на время слепого вывода приёмочного листа этапа 2 закрыто чтение `.sdlc/` (запретный список по
+тексту команды — сильнее промпта, слабее конструкции). Маркеры ставят и снимают скиллы через
+`--lock/--unlock/--scope/--unscope`; действует только активный виток (`.sdlc/.active`). Подключается
+в `.claude/settings.json` **проекта** — hook стартует отдельным процессом на каждый вызов
+инструмента, глобально платить за это всем проектам незачем:
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+  "hooks": [{"type": "command", "command": "python ~/.claude/hooks/sdlc-guard.py"}]}]}}
 ```
 
 После этого в любой сессии Claude Code доступен весь цикл:
@@ -61,8 +76,8 @@
 
 Субагенты по ходу цикла (руками их не запускают — их зовут скиллы):
 
-- внутри `/sdlc-explore` — разведчик и claims-агент (одноразовые, general-purpose): второй выводит
-  приёмочный лист вслепую, для сверки с авторским;
+- внутри `/sdlc-explore` — разведчик (одноразовый, general-purpose) и `sdlc-claims`: второй выводит
+  приёмочный лист вслепую, для сверки с авторским, — без Bash и инструментов записи по построению;
 - внутри `/sdlc-chunk` — `sdlc-locator`: read-only по построению (Read, Grep, Glob), сверяет
   карту плана с реальностью до того, как исполнитель получит права записи;
 - внутри `/sdlc-verify` — `sdlc-reviewer`: получает ровно четыре артефакта (задача, план, набор
@@ -107,21 +122,21 @@
 | `sdlc-explore` | 2. Разведка | `exploration-report.md` |
 | `sdlc-ask` | 3. Вопросы (условный) | `clarification-report.md` |
 | `sdlc-plan` | 4. План | `plan.md` с полем «Одобрение», `readiness.md` (прогон 2) |
-| `sdlc-chunk` | 5. Chunk | `chunk-N-journal.md`, `chunk-N-attempt-K-diff.patch`, `chunk-N-attempt-K-tests.txt` |
-| `sdlc-verify` | 6. Верификация | `verification-report-N-attempt-K.md`; в `tools/flow-verdict.py` — механическая сверка отчёта с набором, claims-цепочки и заполненности (гейт «Сверка отчёта с набором») |
+| `sdlc-chunk` | 5. Chunk | `chunk-N-journal.md`; `chunk-N-attempt-K-diff.patch`, `chunk-N-attempt-K-tests.txt`, `chunk-N-attempt-K-evidence.json`, `.chunk-N-baseline.json` — их производит `attempt-evidence.py` из `sdlc-verify/tools/`, не агент |
+| `sdlc-verify` | 6. Верификация | `verification-report-N-attempt-K.md`; в `tools/flow-verdict.py` — механическая сверка отчёта с набором, claims-цепочки, заполненности и адресатов исходов осей (гейт «Сверка отчёта с набором»); `tools/` — единый ящик инструментов методологии: `sdlc_common.py` (общий разбор), `attempt-evidence.py` (свидетельства, база, сравнение попыток), `gates-preflight.py` (исполнимость набора до попытки), `gates/*.py` (эталонные гейты по JSON-контракту), `base-check.py` (тесты попытки на базе), `scaffold.py` (бланк с механикой), `intent-sections.py` (законные правки задачи), `review-validate.py` (ответ рецензента по схеме verify-review-v1) |
 | `sdlc-handoff` | 7. Commit | `handoff.md` с полем «Приёмка», локальный коммит |
 | `sdlc-seed` | вне витка | `seed-log.md` |
 | `sdlc-retro` | вне витка | `retros/<дата>-<scope>.md` в репозитории методологии |
 
 | Агент | Роль | Инструменты |
 |---|---|---|
+| `sdlc-claims` | слепой вывод приёмочного листа на этапе 2 — без записи по построению; слепота к `.sdlc/` — hook `--claims-lock`, без hook'а инструкция (см. ограничения) | Read, Grep, Glob |
 | `sdlc-locator` | точечная разведка этапа 5 — read-only по построению | Read, Grep, Glob |
 | `sdlc-reviewer` | независимый рецензент этапа 6, модель фиксирована: opus | Read, Grep, Glob, Bash |
 | `sdlc-methodologist` | независимый разбор самой методологии для `/sdlc-retro`, модель фиксирована: opus | Read, Grep, Glob, Bash, WebSearch, WebFetch |
 
-Внутри `/sdlc-explore` работают ещё два одноразовых субагента (разведчик и claims-агент,
-выводящий приёмочный лист вслепую) — они спускаются через general-purpose с промптом из скилла
-и отдельных файлов не требуют.
+Внутри `/sdlc-explore` разведчик — одноразовый general-purpose агент с промптом из скилла,
+отдельного файла не требует; claims-агент — зарегистрированный `sdlc-claims`.
 
 ## Как реализация отображает методологию
 
@@ -134,6 +149,9 @@
   (`attempt-K`); детект отсутствия прогресса сравнивает сохранённые diff'ы соседних попыток.
 - **Этап 6 не доверяет этапу 5**: `sdlc-verify` перегенерирует diff из рабочего дерева, сборку
   и тесты прогоняет сам; файлы исполнителя — только для сверки.
+- **Свидетельства производит программа**: патч, вывод тестов и `evidence.json` попытки пишет
+  `attempt-evidence.py`, а не исполнитель; файлы без записи инструмента этап 6 свидетельством
+  не считает. Контекст-пакет для исполнителя — секция плана, не сообщение в чате.
 - **Права на шаг, а не на прогон**: `sdlc-locator` получает урезанный набор инструментов
   во frontmatter, а не обещание в промпте.
 - **Автор не рецензирует себя**: `sdlc-verify` передаёт рецензенту ровно четыре артефакта —
@@ -152,10 +170,19 @@
 
 Честный список мест, где ограничение держится на промпте, потому что харнесс не умеет строже:
 
-- **claims-агент** запускается как general-purpose с полными инструментами; его «слепота»
-  к авторскому листу — запрет в промпте («не открывай `.sdlc/`»), а не отсутствие Read.
-- **`sdlc-reviewer` имеет полный Bash**; «не менять репозиторий» — правило его промпта.
-  Write у него нет по построению, но Bash писать умеет.
+- **`sdlc-claims`** без Bash и записи по построению, но Read у него есть. С подключённым hook'ом
+  `sdlc-guard.py` скилл разведки ставит `.claims-lock`, и чтение `.sdlc/` на время Phase 1
+  отклоняется всем субагентам — слепота становится конструкцией; без hook'а остаётся запрет в
+  промпте («не открывай `.sdlc/`»).
+- **`sdlc-reviewer` имеет полный Bash**; Write у него нет по построению. Пока hook `sdlc-guard.py`
+  не подключён, «не менять репозиторий» — правило промпта; с hook'ом и маркером `.review-lock`
+  штатная запись отклоняется, но это запретный список по тексту команды (`python -c "open(…,'w')"`
+  ловится, произвольный интерпретатор — нет), а не доказательство невозможности.
+- **`allowed-tools` во frontmatter скиллов** по семантике Claude Code — **предодобрение** на ход
+  скилла (инструменты из списка не спрашивают разрешения), а не ограничение: снять инструмент у
+  скилла нельзя, только у субагента (`tools:`). Голый `Bash` у `sdlc-chunk`/`sdlc-verify`/`sdlc-seed`
+  предодобряет любую команду на весь прогон этапа — это «права на прогон», и принцип «права на шаг»
+  здесь держится только hook'ом и субагентами. Таблица прав ниже — то, что реально предодобрено.
 - **«более сильная модель»** у рецензента зафиксирована как `model: opus` — если исполнитель сам
   работает на opus или сильнее, превосходство модели не гарантируется.
 - **`sdlc-methodologist` тоже имеет полный Bash** (и `WebSearch`/`WebFetch`) — «не мутировать
@@ -163,10 +190,29 @@
 
 Кто хочет строже — переводит эти строки в свой набор гейтов как долг с принятым риском.
 
-## Шаблоны
+### Права скиллов (allowed-tools)
+
+_Что предодобрено каждому скиллу; `tools/check-consistency.py` сверяет таблицу с frontmatter._
+
+| Скилл | allowed-tools |
+|---|---|
+| `sdlc-intent` | Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(git checkout:*), Bash(git branch:*), Bash(git rev-parse:*), Bash(python:*) |
+| `sdlc-explore` | Read, Grep, Glob, Write, Edit, Agent, AskUserQuestion, Bash(python:*) |
+| `sdlc-ask` | Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(python:*) |
+| `sdlc-plan` | Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(git rev-parse:*), Bash(git grep:*), Bash(python:*) |
+| `sdlc-chunk` | Read, Grep, Glob, Write, Edit, Agent, AskUserQuestion, Bash |
+| `sdlc-verify` | Read, Grep, Glob, Write, Edit, Agent, AskUserQuestion, Bash |
+| `sdlc-handoff` | Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(git:*), Bash(python:*) |
+| `sdlc-seed` | Read, Grep, Glob, Write, Edit, Agent, AskUserQuestion, Bash |
+| `sdlc-retro` | Read, Grep, Glob, Write, Agent, AskUserQuestion, Bash(python:*) |
+
+## Шаблоны и константы
 
 Шаблоны в `skills/*/templates/` — установочные копии канонических из корневого
-[`templates/`](../../templates/) репозитория. Правки делаются в корне и разливаются скриптом:
+[`templates/`](../../templates/) репозитория; `skills/sdlc-verify/tools/sdlc-constants.json` —
+установочная копия корневого [`sdlc-constants.json`](../../sdlc-constants.json) (минимум гейтов,
+оси, умолчание бюджета, таблица вердикта — `flow-verdict.py` читает их оттуда, не из хардкода).
+Правки делаются в корне и разливаются скриптом:
 
 ```bash
 ../../sync-templates.sh          # скопировать корень → скиллы

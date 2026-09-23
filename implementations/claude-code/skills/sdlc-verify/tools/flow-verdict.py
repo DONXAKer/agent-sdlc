@@ -19,20 +19,18 @@
 Код возврата: 0 — контракт цел / значение напечатано; 1 — есть провалы; 2 — неверный вызов.
 """
 
+import json
 import re
 import sys
 from pathlib import Path
 
-PLACEHOLDER = "‹"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sdlc_common import (  # noqa: E402  — константы и разбор: один источник на все инструменты
+    ACTIONS, AXES, CHUNK_FILES, CHUNK_LINES, CONSTANTS, DEFAULT_BUDGET as _DEFAULT_BUDGET,
+    MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
+)
 
-# Канонический минимум — жёсткий пол, дословно из SDLC.md → «Набор гейтов проекта».
-# mandatory_gates() всегда добавляет его к пометкам набора (union): пометка «да — минимум»
-# расширяет минимум, но снятие пометки от проверки не освобождает.
-MANDATORY_FALLBACK = [
-    "Сборка", "Тесты", "Scope: файлы вне плана", "Анти-обход тест-гейта",
-    "Ревью независимым агентом",
-]
-DEFAULT_BUDGET = "3"  # норма SDLC.md → этап 6; шаблон журнала обязан совпадать
+DEFAULT_BUDGET = str(_DEFAULT_BUDGET)  # норма SDLC.md → этап 6; шаблон журнала сверяет tools/check-consistency.py
 
 ATTEMPT_ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.M)
 # [^0-9\n‹] — не перескакивать на цифры следующих строк и не принимать ‹плейсхолдер› за значение
@@ -42,9 +40,8 @@ BUDGET_RE = re.compile(r"Бюджет попыток\*{0,2}:\*{0,2}[^0-9\n‹]*(
 # четвёртое законное значение (SDLC.md → этап 6, «Красный из-за окружения»;
 # шаблон отчёта его перечисляет наравне с остальными) — отсутствовало здесь,
 # отчёт с ним не распознавался как заполненный.
-ACTION_RE = re.compile(
-    r"\*\*action:\*\*\s*(continue|retry|escalate|blocked_env)\b"
-    r"(?!\s*/\s*(?:continue|retry|escalate|blocked_env))", re.M)
+_ACT = "|".join(re.escape(a) for a in ACTIONS)
+ACTION_RE = re.compile(r"\*\*action:\*\*\s*(" + _ACT + r")\b(?!\s*/\s*(?:" + _ACT + r"))", re.M)
 # «да» с человеческим комментарием («да (с 2026-08)», «да, см. журнал») — тоже включён:
 # жёсткое «ровно да» молча выводило бы такой гейт из-под сверки. (?!\w) отсекает слова на «да…»
 ENABLED_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да(?!\w)[^|]*\|\s*этап 6\s*\|", re.M)
@@ -128,21 +125,7 @@ def plan_approved(plan: str) -> bool:
 
 
 def attempt_nums(journal: str):
-    """Строки таблицы «Попытки». Шаблонная заготовка (‹дата› во второй ячейке) — не попытка;
-    реальная строка с остаточным ‹…› в хвостовой ячейке ИЗ СЧЁТА НЕ выпадает — иначе один
-    незаполненный столбец каскадом ронял бы непрерывность и детекты раннера (дыру и так
-    ловит скан заполненности)."""
-    nums = []
-    for ln in (journal or "").splitlines():
-        m = ATTEMPT_ROW.match(ln)
-        if not m:
-            continue
-        cells = ln.split("|")
-        date_cell = cells[2] if len(cells) > 2 else ""
-        if PLACEHOLDER in strip_literal_spans(date_cell):
-            continue  # заготовка шаблона
-        nums.append(int(m.group(1)))
-    return nums
+    return _attempt_nums(journal)
 
 
 def budget_of(journal: str) -> str:
@@ -235,7 +218,7 @@ def md_sections(text: str):
 
 
 def claims_in(text):
-    return set(re.findall(r"\bclaim-\d+\b", text or ""))
+    return _claims_in(text)
 
 
 # ---------------------------------------------------------------- --print для оркестраторов
@@ -382,9 +365,11 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     v.check(bool(diffs) and bool(tests_out), "diff и вывод тестов попыток",
             "нет файлов attempt-K", "артефакты попыток не сохраняются — детект прогресса слеп")
 
-    # --- 2. Плейсхолдеры — по всем артефактам витка -------------------------------------------
+    # --- 2. Плейсхолдеры — по всем артефактам витка, кроме улик и архива ------------------------
+    # chunk-N-attempt-K-review.md — сырой ответ рецензента (он вправе цитировать «‹причина›»),
+    # plan-vK.md — прежняя редакция плана; оба не форма, скан их не судит.
     for name, text in texts.items():
-        if not text:
+        if not text or name.endswith("-review.md") or re.match(r"plan-v\d+\.md$", name):
             continue
         holes = holes_in(text)
         detail = (f"{len(holes)} строк с плейсхолдером, первая: {holes[0].strip()[:60]}"
@@ -398,8 +383,17 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 f"строка «Одобрение»: {approval_line(plan).strip()[:70] or 'отсутствует'}",
                 "одобрение живёт в чате или план явно не одобрен — чинить /sdlc-plan Phase 5")
     if handoff and full:
-        v.check(bool(re.search(r"\*\*Приёмка:\*\*", handoff)),
-                "приёмка записана в handoff", "поля «Приёмка» нет",
+        # handoff дописывается новой секцией на каждый виток той же задачи (SDLC.md → «Раскладка
+        # артефактов»): действует ПОСЛЕДНЯЯ запись «Приёмка», а не первая попавшаяся — иначе
+        # приёмка прошлого витка засчитывалась бы новому (у которого поля может не быть вовсе)
+        acc_lines = [ln for ln in handoff.splitlines() if "**Приёмка:**" in ln]
+        last_acc = acc_lines[-1].split("**Приёмка:**", 1)[-1].strip() if acc_lines else ""
+        loops = [s_ for s_ in md_sections(handoff) if s_.startswith("Виток ")]
+        last_loop = loops[-1] if loops else handoff
+        v.check(bool(acc_lines) and "**Приёмка:**" in last_loop
+                and bool(last_acc) and PLACEHOLDER not in strip_literal_spans(last_acc),
+                "приёмка записана в handoff (последний виток)",
+                "поля «Приёмка» нет в последней секции витка или оно не заполнено",
                 "приёмка человеком не фиксируется — чинить /sdlc-handoff Phase 1")
     for p in journals:
         j = texts.get(p.name) or ""
@@ -545,6 +539,100 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         v.check(not any(".sdlc/" in ln for ln in table_rows),
                 "files_to_touch без .sdlc/**", ".sdlc в таблице путей",
                 "артефакты процесса попали в scope кода")
+
+    # --- 8. Разбор последствий: строка на каждую ось, адресат каждого исхода существует ------------
+    # SDLC.md → этап 4: «Адресат исхода обязан существовать … Проверка механическая» — до этой
+    # секции обещание держалось прозой: шесть осей закрывались «claim-99» и «гейт «Такого нет»».
+    if gates and plan and intent and re.search(r"^\|\s*Разбор последствий\s*\|\s*да(?!\w)", gates, re.M):
+        section = next((s_ for s_ in md_sections(plan) if s_.startswith("Последствия шагов")), "")
+        # две таблицы секции различаются заголовком, а не порядком: «| Ось | Затронута шагами |»
+        # и «| Ось | Риск словами |»
+        axis_rows, risk_axes, current = {}, set(), None
+        for ln in section.splitlines():
+            if not ln.strip().startswith("|"):
+                continue
+            r = [c.strip() for c in ln.strip().strip("|").split("|")]
+            if len(r) >= 2 and r[0] == "Ось":
+                current = "axes" if r[1].startswith("Затронута") else ("risks" if r[1].startswith("Риск") else None)
+                continue
+            if not r or r[0] not in AXES or set(r[0]) <= {"-"}:
+                continue
+            if current == "axes" and r[0] not in axis_rows:
+                axis_rows[r[0]] = r
+            elif current == "risks":
+                risk_axes.add(r[0])
+        missing = [a for a in AXES if a not in axis_rows]
+        v.check(not missing, "разбор последствий: строка на каждую ось канона",
+                f"нет строк: {missing}" if missing else "",
+                "сокращённая таблица делает «оси нет» неотличимым от «не подумали» (SDLC.md → этап 4)")
+        open_q = bool(re.search(r"^- \[ \] \*\*\[неблокирующий\]\*\*", intent, re.M))
+        inv_section = next((s_ for s_ in md_sections(intent) if s_.startswith("Инварианты")), "")
+        has_invariant = any(ln.startswith("- ") and not ln.startswith("- н/п")
+                            and PLACEHOLDER not in strip_literal_spans(ln)
+                            for ln in inv_section.splitlines())
+        ci = claims_in(intent)
+        problems = []
+        for axis, r in axis_rows.items():
+            raw = r[3] if len(r) > 3 else ""
+            outcome = strip_literal_spans(raw).strip()
+            low = outcome.lower()
+            if re.search(r"\bclaim-\d+\b", raw):
+                for cid in sorted(claims_in(raw)):
+                    if cid not in ci:
+                        problems.append(f"{axis}: {cid} нет в задаче")
+            elif low.startswith("гейт"):
+                m = re.search(r"«([^»]+)»", raw)
+                name = m.group(1) if m else ""
+                if not name or not re.search(rf"^\|\s*{re.escape(name)}\s*\|\s*да(?!\w)", gates, re.M):
+                    problems.append(f"{axis}: гейт «{name}» не включён в наборе")
+            elif low.startswith("следующий виток"):
+                if not open_q:
+                    problems.append(f"{axis}: «следующий виток» без открытого неблокирующего вопроса в задаче")
+            elif low.startswith("риск"):
+                if axis not in risk_axes:
+                    problems.append(f"{axis}: «риск» без строки в таблице принятых рисков")
+            elif low.startswith("инвариант"):
+                if not has_invariant:
+                    problems.append(f"{axis}: «инвариант» при пустой секции «Инварианты» задачи")
+            elif low.startswith("н/п"):
+                # причина — по сырой ячейке: «н/п — «ось не затронута»» законна, en-dash тоже
+                if not re.search(r"н/п\s*[—–-]\s*\S", raw.strip()):
+                    problems.append(f"{axis}: «н/п» без причины")
+            else:
+                problems.append(f"{axis}: исход «{outcome[:40]}» вне словаря")
+        v.check(not problems, "разбор последствий: адресаты исходов существуют",
+                "; ".join(problems),
+                "исход без адресата — то же ключевое слово вместо решения (SDLC.md → этап 4)")
+
+    # --- 9. Размер chunk'а: ориентир измерим, молчаливое превышение — нет ---------------------------
+    # SDLC.md → этап 4: до ~400 строк и ~8 файлов; больше — законно только со строкой плана
+    # «почему этот chunk больше ориентира». Diff попытки кумулятивен от base_sha витка (SDLC.md →
+    # этап 6), поэтому chunk'у приписывается ПРИРАЩЕНИЕ: его последняя попытка минус последняя
+    # попытка предыдущего chunk'а. Свидетельств нет — проверять нечего, и это не провал.
+    by_chunk = {}
+    for ev in natsorted(d.glob("chunk-*-attempt-*-evidence.json")):
+        m = re.match(r"chunk-(\d+)-attempt-(\d+)-evidence\.json", ev.name)
+        try:
+            rec = json.loads(read(ev) or "{}")
+        except json.JSONDecodeError:
+            v.fail(f"свидетельство {ev.name} читается", "не JSON", "evidence.json пишет инструмент, не агент")
+            continue
+        if m:
+            by_chunk.setdefault(int(m.group(1)), {})[int(m.group(2))] = rec.get("diffstat") or {}
+    explained = bool(re.search(r"почему этот chunk больше ориентира", plan or ""))
+    prev_lines, prev_files = 0, 0
+    for cn in sorted(by_chunk):
+        stat = by_chunk[cn][max(by_chunk[cn])]
+        total_lines = int(stat.get("added", 0)) + int(stat.get("deleted", 0))
+        total_files = int(stat.get("files", 0))
+        lines, files = max(0, total_lines - prev_lines), max(0, total_files - prev_files)
+        prev_lines, prev_files = total_lines, total_files
+        over = lines > CHUNK_LINES or files > CHUNK_FILES
+        v.check(not over or explained,
+                f"размер chunk-{cn} в ориентире или объяснён",
+                f"{lines} строк / {files} файлов при ориентире {CHUNK_LINES} / {CHUNK_FILES}, "
+                "строки «почему этот chunk больше ориентира» в плане нет",
+                "молчаливое превышение ориентира — рецензент вправе вернуть diff как непроверяемый целиком")
 
     # --- Отчёт -----------------------------------------------------------------------------------
     print(f"# Вердикт флоу: {slug} (--at {at})\n")

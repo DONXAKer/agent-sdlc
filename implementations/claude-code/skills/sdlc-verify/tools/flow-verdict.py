@@ -241,6 +241,19 @@ def claims_in(text):
 # ---------------------------------------------------------------- --print для оркестраторов
 
 def do_print(what: str, root: Path, slug: str) -> int:
+    try:
+        state = canonical_state(root, slug)
+        if state is not None:
+            values = {"action": state["verification"]["action"],
+                      "attempts": len(state["attempts"]),
+                      "chunk": max((a["chunk"] for a in state["attempts"]), default=1)}
+            if what not in values:
+                raise ValueError(f"--print {what}: v1 state не содержит надёжной проекции; Markdown не используется")
+            print(values[what])
+            return 0
+    except (ValueError, OSError) as exc:
+        print(f"❌ state-first: {exc}", file=sys.stderr)
+        return 1
     d = root / ".sdlc" / slug
     journals = natsorted(d.glob("chunk-*-journal.md"))
     j = read(journals[-1]) if journals else None
@@ -344,7 +357,67 @@ class Verdict:
             self.fail(name, detail, improvement)
 
 
+def canonical_state(root, slug):
+    """None means legacy; a present but invalid canonical file never falls back."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
+        raise ValueError("недопустимый slug витка")
+    path = root / ".sdlc" / slug / "state.json"
+    if not path.exists() and not path.is_symlink():
+        return None
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError("state.json выходит за корень проекта")
+    import importlib.util
+    local_tool = Path(__file__).resolve().parent / "state_contract.py"
+    tool = local_tool if local_tool.is_file() else next(
+        (parent / "runner-contract" / "tools" / "state_contract.py"
+         for parent in Path(__file__).resolve().parents
+         if (parent / "runner-contract" / "tools" / "state_contract.py").is_file()), None)
+    if tool is None:
+        raise ValueError("state.json существует, но reference validator не установлен рядом с реализацией")
+    spec = importlib.util.spec_from_file_location("agent_sdlc_state", tool)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    state = module.load(path)
+    errors = module.validate_state(state)
+    if not errors:
+        if state["slug"] != slug:
+            errors.append("state.slug не совпадает с каталогом витка")
+        errors.extend(module.evidence_errors(state, root, path.parent))
+    if errors:
+        raise ValueError("; ".join(errors))
+    return state
+
+
+def state_verdict(root, slug, at):
+    try:
+        state = canonical_state(root, slug)
+        if state is None:
+            return None
+        errors = []
+        if state["stage"] != at:
+            errors.append(f"ожидался stage={at}, получен {state['stage']}")
+        if not state["verification"]["passed"]:
+            errors.append("verification.passed=false")
+        limit = 7 if at == "handoff" else 6
+        enabled = {g["name"] for g in state["gates"] if g["enabled"] and g["stage"] <= limit}
+        for name in MANDATORY_FALLBACK:
+            if name not in enabled:
+                errors.append(f"нет обязательного гейта: {name}")
+        print(f"# Вердикт state-first: {slug} (--at {at})")
+        for error in errors:
+            print(f"❌ {error}")
+        if not errors:
+            print("✅ Канонический контракт и доступные evidence проверены")
+        return 1 if errors else 0
+    except (ValueError, OSError) as exc:
+        print(f"❌ state-first: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(root: Path, slug: str, at: str = "handoff") -> int:
+    canonical = state_verdict(root, slug, at)
+    if canonical is not None:
+        return canonical
     v = Verdict()
     full = at == "handoff"
     sdlc = root / ".sdlc"

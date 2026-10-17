@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-sdlc.dev/schemas/verify-review-v1.schema.json",
+  "title": "Agent-SDLC verify reviewer response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "claims", "findings", "scope", "invariants", "regressions", "retry_instruction"],
+  "properties": {
+    "schema_version": {"const": "agent-sdlc/verify-review/v1"},
+    "claims": {"type": "array", "items": {"$ref": "#/$defs/claim_result"}},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "scope": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "invariants": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "regressions": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "retry_instruction": {"type": "string"}
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "anchor"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "anchor": {"type": "string", "minLength": 1}
+      }
+    },
+    "claim_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "evidence", "remediation"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^claim-[1-9][0-9]*$"},
+        "status": {"enum": ["passed", "failed", "uncertain", "manual"]},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/reference"}},
+        "remediation": {"type": "string"}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "summary", "evidence"],
+      "properties": {
+        "kind": {"enum": ["mismatch", "uncovered_behavior", "scope", "invariant", "regression"]},
+        "summary": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/reference"}}
+      }
+    }
+  }
+}

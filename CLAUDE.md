@@ -15,8 +15,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Структура
 
 - **`SDLC.md`** — вся методология одним файлом: семь этапов, гейты, вердикт, словарь терминов. Первоисточник; остальные файлы должны с ним сходиться.
-- **`templates/`** — **канонические** шаблоны артефактов витка, все девять: intent, readiness, exploration-report, clarification-report, plan, chunk-journal, verification-report, handoff, gates.
-- **`implementations/claude-code/`** — рабочая реализация: девять скиллов `/sdlc-intent` … `/sdlc-handoff` + `/sdlc-seed` + `/sdlc-retro` (`skills/*/SKILL.md`) и три субагента с урезанными правами (`agents/sdlc-locator.md` — read-only разведка, `agents/sdlc-reviewer.md` — независимое ревью, `agents/sdlc-methodologist.md` — независимый разбор методологии для `/sdlc-retro`).
+- **`templates/`** — **канонические** шаблоны артефактов витка, десять: intent, readiness, exploration-report, clarification-report, plan, acceptance-checks, chunk-journal, verification-report, handoff, gates.
+- **`implementations/claude-code/`** — рабочая реализация: девять скиллов `/sdlc-intent` … `/sdlc-handoff` + `/sdlc-seed` + `/sdlc-retro` (`skills/*/SKILL.md`) и четыре субагента с урезанными правами (`agents/sdlc-claims.md` — независимые claims, `agents/sdlc-locator.md` — read-only разведка, `agents/sdlc-reviewer.md` — независимое ревью, `agents/sdlc-methodologist.md` — независимый разбор методологии для `/sdlc-retro`).
 - **`example/`** — заполненные артефакты одного реального витка (Java/Spring). Виток **намеренно не принят** (ревью нашло дефект) — это часть примера, не ошибка. Артефактов этапа 5 (diff, вывод тестов) в примере нет намеренно: они порождаются кодовой базой витка.
 - **`retros/`** — рабочий каталог `/sdlc-retro` (ретроспектива методологии, вне витка); появляется при запуске скилла, в репозитории не хранится. Отчёт ретроспективы — черновик триажа, а не документ методологии: см. правило «ретроспектива закрывается правкой, а не файлом» ниже.
 
@@ -41,6 +41,7 @@ python3 test/run-corpus.py     # регрессионный корпус flow-ve
                                 # правка tools/flow-verdict.py без зелёного прогона не коммитится;
                                 # --update переписывает expected.txt, только после того как
                                 # расхождение объяснено в теле коммита
+python3 -B -m unittest discover -s test -p 'test_state*.py' -v  # state-first контракт и реальный CLI
 test/run-e2e.sh [dir]          # полный e2e-прогон флоу (дорого: реальные сессии claude)
 python3 test/verdict.py <run-dir> <slug>   # механический контракт флоу по готовым артефактам
 ```
@@ -48,3 +49,17 @@ python3 test/verdict.py <run-dir> <slug>   # механический контр
 Установка реализации — только через `./install.sh` (бэкап расходящихся глобальных версий +
 честная синхронизация sdlc-*; `--check` — сверка). Голый `cp -r` не использовать: он не удаляет
 убранные из репо файлы и молча затирает пользовательские правки.
+
+## Дополнения к проверке качества
+
+Риск фиксируется как низкий/обычный/высокий; пять минимальных гейтов не меняются.
+Независимые исполняемые приёмочные проверки — acceptance-checks.md до этапа 5 для применимых
+поведенческих задач (для документации решение о н/п принимает человек); автор не
+редактирует набор/evidence. Защита требует внешнего исполнителя, права Read не ограничивают
+пути. Ограниченное разрешение плана переиспользуется внутри явно одобренных границ; решения
+человека не сочиняются. Рецензент допускается по посевам и чистым контролям, без гарантии
+по имени модели. Изменение процесса проверяется против базовой версии на отложенном наборе.
+
+Reference-валидатор и схемы правятся в implementations/runner-contract, затем копируются
+общим sync-templates.sh в tools скилла sdlc-verify. Копии не редактируются вручную. Наличие
+canonical state исключает Markdown fallback; ограничения схемы v1 описаны в README контракта.

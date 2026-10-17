@@ -15,6 +15,7 @@ declare -a MAP=(
   "exploration-report.template.md $SKILLS/sdlc-explore"
   "clarification-report.template.md $SKILLS/sdlc-ask"
   "plan.template.md              $SKILLS/sdlc-plan"
+  "acceptance-checks.template.md $SKILLS/sdlc-plan $SKILLS/sdlc-verify"
   "chunk-journal.template.md     $SKILLS/sdlc-chunk"
   "verification-report.template.md $SKILLS/sdlc-verify"
   "handoff.template.md           $SKILLS/sdlc-handoff"
@@ -39,6 +40,28 @@ for row in "${MAP[@]}"; do
       echo "→ $dst"
     fi
   done
+done
+
+# state-first контракт нужен и установленному скиллу вне checkout репозитория.
+# Первоисточник — implementations/runner-contract; копии разливаются только отсюда.
+CONTRACT=implementations/runner-contract
+CONTRACT_DST="$SKILLS/sdlc-verify/tools"
+for relative in tools/state_contract.py schemas/agent-sdlc-state-v1.schema.json schemas/verify-review-v1.schema.json; do
+  src="$CONTRACT/$relative"
+  case "$relative" in
+    tools/*) dst="$CONTRACT_DST/$(basename "$relative")" ;;
+    schemas/*) dst="$CONTRACT_DST/state_contract/$relative" ;;
+  esac
+  if [[ "$mode" == "--check" ]]; then
+    if ! diff -q "$src" "$dst" >/dev/null 2>&1; then
+      echo "РАЗОШЛОСЬ: $src ↔ $dst"
+      fail=1
+    fi
+  else
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+    echo "→ $dst"
+  fi
 done
 
 # --- сироты: копия в скилле, которой нет в корне (шаблон удалён/переименован) ---------------

@@ -12,9 +12,13 @@ import sys
 import hashlib
 from pathlib import Path
 
-for _stream in (sys.stdout, sys.stderr):  # глифы ✅/❌ в выводе, Windows-консоль cp1251
+for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
+
+SCHEMA_DIR = (Path(__file__).resolve().parent.parent / "schemas")
+if not SCHEMA_DIR.is_dir():
+    SCHEMA_DIR = Path(__file__).resolve().parent / "state_contract" / "schemas"
 
 STATE_VERSION = "agent-sdlc/state/v1"
 REVIEW_VERSION = "agent-sdlc/verify-review/v1"
@@ -25,7 +29,7 @@ SHA_RE = re.compile(r"[a-f0-9]{64}$")
 def load(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{path}: {exc}") from exc
 
 
@@ -57,7 +61,7 @@ def reference_errors(ref, where):
     return errors
 
 
-def validate_review(review, claim_ids=None):
+def _validate_review_structure(review, claim_ids=None):
     errors = []
     obj = expect_keys(
         review, "review",
@@ -123,7 +127,7 @@ def validate_review(review, claim_ids=None):
     return errors
 
 
-def validate_state(state):
+def _validate_state_structure(state):
     errors = []
     obj = expect_keys(
         state, "state",
@@ -173,6 +177,147 @@ def validate_state(state):
         for field in ("artifacts", "unresolved"):
             if not isinstance(migration.get(field), list) or not all(isinstance(x, str) and x for x in migration[field]):
                 errors.append(f"state.migration.{field}: ожидается массив непустых строк")
+    return errors
+
+
+# Validate the exact keyword subset used by the shipped v1 schemas, without dependencies.
+def schema_errors(value, schema, document, where):
+    if "$ref" in schema:
+        ref = schema["$ref"]
+        if ref.startswith("#/"):
+            target = document
+            for part in ref[2:].split("/"):
+                target = target[part]
+            return schema_errors(value, target, document, where)
+        target = load(SCHEMA_DIR / ref)
+        return schema_errors(value, target, target, where)
+    errors = []
+    types = {"object": dict, "array": list, "string": str, "boolean": bool, "integer": int}
+    kind = schema.get("type")
+    if kind and (not isinstance(value, types[kind]) or kind == "integer" and isinstance(value, bool)):
+        return [f"{where}: ожидается {kind}"]
+    if "const" in schema and value != schema["const"]:
+        errors.append(f"{where}: неверная константа")
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{where}: недопустимое значение")
+    if isinstance(value, dict):
+        props = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in value:
+                errors.append(f"{where}: нет обязательного поля {key}")
+        for key, item in value.items():
+            if key not in props and schema.get("additionalProperties") is False:
+                errors.append(f"{where}: неизвестное поле {key}")
+            elif key in props:
+                errors.extend(schema_errors(item, props[key], document, f"{where}.{key}"))
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            errors.extend(schema_errors(item, schema.get("items", {}), document, f"{where}[{index}]"))
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            errors.append(f"{where}: пустая строка")
+        if "pattern" in schema and not re.fullmatch(schema["pattern"], value):
+            errors.append(f"{where}: неверный формат")
+        if schema.get("format") == "date-time":
+            from datetime import datetime
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    raise ValueError()
+            except ValueError:
+                errors.append(f"{where}: нужен date-time с часовым поясом")
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value < schema.get("minimum", value) or value > schema.get("maximum", value):
+            errors.append(f"{where}: вне диапазона")
+    return errors
+
+
+def validate_review(review, claim_ids=None):
+    schema = load(SCHEMA_DIR / "verify-review-v1.schema.json")
+    errors = schema_errors(review, schema, schema, "review")
+    if errors:
+        return errors
+    return _validate_review_structure(review, claim_ids)
+
+
+def validate_state(state):
+    schema = load(SCHEMA_DIR / "agent-sdlc-state-v1.schema.json")
+    errors = schema_errors(state, schema, schema, "state")
+    if errors:
+        return errors
+    errors.extend(_validate_state_structure(state))
+    verification = state["verification"]
+    review = verification["review"]
+    claims = {claim["id"]: claim for claim in state["claims"]}
+    for result in review["claims"]:
+        if result["status"] == "passed" and not result["evidence"]:
+            errors.append(f"{result['id']}: passed требует evidence")
+        if result["status"] == "manual" and "manual" not in claims.get(result["id"], {}).get("tags", []):
+            errors.append(f"{result['id']}: manual требует канонический тег manual")
+    if verification["passed"] != (verification["action"] == "continue"):
+        errors.append("state.verification: passed/action противоречат друг другу")
+    if verification["passed"]:
+        if not claims:
+            errors.append("passed требует непустой приёмки")
+        if state["stage"] not in {"verify", "handoff"}:
+            errors.append("passed допустим только на verify/handoff")
+        if any(item["status"] in {"failed", "uncertain"} for item in review["claims"]):
+            errors.append("passed противоречит failed/uncertain claims")
+        if any(review[field] for field in ("findings", "scope", "invariants", "regressions")):
+            errors.append("passed противоречит открытым findings")
+        limit = 7 if state["stage"] == "handoff" else 6
+        required = {"Сборка", "Тесты", "Scope: файлы вне плана", "Анти-обход тест-гейта", "Ревью независимым агентом"}
+        if any(g["name"] in required and g["stage"] != 6 for g in state["gates"]):
+            errors.append("минимальные гейты должны относиться к этапу 6")
+        covered = {g["name"] for g in state["gates"] if g["enabled"] and g["stage"] <= limit}
+        if not required <= covered:
+            errors.append("passed требует минимальный набор гейтов текущего этапа")
+        if any(g["enabled"] and g["stage"] <= limit and g["status"] == "passed" and not g.get("evidence")
+               for g in state["gates"]):
+            errors.append("passed гейт требует хотя бы одно хэшированное evidence")
+        if any(g["enabled"] and g["stage"] <= limit and g["status"] != "passed" for g in state["gates"]):
+            errors.append("passed противоречит непройденному обязательному гейту этапа")
+        if state.get("migration", {}).get("unresolved"):
+            errors.append("passed противоречит unresolved migration")
+    gate_ids = [(g["name"], g["stage"]) for g in state["gates"]]
+    attempt_ids = [(a["chunk"], a["number"]) for a in state["attempts"]]
+    if len(set(gate_ids)) != len(gate_ids) or len(set(attempt_ids)) != len(attempt_ids):
+        errors.append("дублируются гейты или попытки")
+    return errors
+
+
+def evidence_errors(state, root, directory):
+    """Paths are project-relative; explicit artifact: prefix selects run-relative files."""
+    errors = []
+    root, directory = root.resolve(), directory.resolve()
+    def check(ref):
+        path = ref["path"]
+        base = directory if path.startswith("artifact:") else root
+        raw = path[len("artifact:"):] if path.startswith("artifact:") else path
+        candidate = (base / raw).resolve()
+        if not raw or Path(raw).is_absolute() or not candidate.is_relative_to(base):
+            errors.append(f"evidence: путь вне разрешённого корня: {path}")
+        elif not candidate.is_file():
+            errors.append(f"evidence: файл отсутствует: {path}")
+        elif "sha256" in ref and sha256(candidate) != ref["sha256"]:
+            errors.append(f"evidence: sha256 не совпадает: {path}")
+    for gate in state["gates"]:
+        for ref in gate.get("evidence", []):
+            check(ref)
+    for attempt in state["attempts"]:
+        for field in ("diff", "tests"):
+            if field in attempt:
+                check(attempt[field])
+    for field in ("claims", "findings", "scope", "invariants", "regressions"):
+        for item in state["verification"]["review"][field]:
+            for ref in item["evidence"]:
+                check(ref)
+    for artifact in state.get("migration", {}).get("artifacts", []):
+        path, separator, digest = artifact.rpartition(":")
+        if not separator or not SHA_RE.fullmatch(digest):
+            errors.append("migration.artifacts: ожидается artifact-relative-path:sha256")
+        else:
+            check({"path": "artifact:" + path, "sha256": digest})
     return errors
 
 
@@ -236,7 +381,7 @@ def import_legacy(root, slug):
     report_path = report_paths[-1]
     review_claims = [{
         "id": claim["id"], "status": "uncertain",
-        "evidence": [{"path": report_path.name, "anchor": claim["id"]}],
+        "evidence": [{"path": "artifact:" + report_path.name, "anchor": claim["id"]}],
         "remediation": "Требуется повторная верификация из канонического state."
     } for claim in claims]
     artifacts = [intent_path, report_path]

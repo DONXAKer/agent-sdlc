@@ -18,10 +18,18 @@ class StateFirstVerdictTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.run = self.root / '.sdlc/SCHED-101'
         self.run.mkdir(parents=True)
-        (self.run / 'verification-report-1-attempt-1.md').write_text('**passed:** false\n❌ stale')
+        (self.run / 'verification-report-1-attempt-1.md').write_text('**passed:** false\n❌ stale', encoding='utf-8', newline='\n')
         (self.root / 'scheduler').mkdir()
-        (self.root / 'scheduler/core.py').write_text('def cancel(): pass\n')
+        (self.root / 'scheduler/core.py').write_text('def cancel(): pass\n', encoding='utf-8', newline='\n')
         self.state = valid_state()
+
+    def symlink(self, link, target):
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows не разрешает создание симлинков без соответствующего права")
+            raise
 
     def invoke(self, *args):
         (self.run / 'state.json').write_text(json.dumps(self.state))
@@ -29,7 +37,7 @@ class StateFirstVerdictTests(unittest.TestCase):
 
     def cli(self, *args):
         return subprocess.run([sys.executable, str(TOOL), '--at', 'verify', *args,
-                               str(self.root), 'SCHED-101'], capture_output=True, text=True)
+                               str(self.root), 'SCHED-101'], capture_output=True, text=True, encoding='utf-8')
 
     def test_valid_state_ignores_stale_markdown(self):
         result = self.invoke()
@@ -46,7 +54,7 @@ class StateFirstVerdictTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as outside:
             target = Path(outside) / 'state.json'
             target.write_text(json.dumps(self.state))
-            (self.run / 'state.json').symlink_to(target)
+            self.symlink(self.run / 'state.json', target)
             result = self.cli()
             self.assertEqual(1, result.returncode)
             self.assertIn('state.json выходит за корень', result.stderr)
@@ -73,7 +81,7 @@ class StateFirstVerdictTests(unittest.TestCase):
         self.state['gates'][0]['evidence'] = [{'path': 'artifact:tests.txt', 'sha256': hashlib.sha256(b'ok').hexdigest()}]
         self.assertEqual(0, self.invoke().returncode)
         artifact.unlink()
-        artifact.symlink_to('/etc/passwd')
+        self.symlink(artifact, self.root.parent / 'outside-evidence')
         self.assertEqual(1, self.invoke().returncode)
 
     def test_installed_bundle_without_repository_is_portable(self):
@@ -81,13 +89,15 @@ class StateFirstVerdictTests(unittest.TestCase):
         bundle = self.root / 'installed/tools'
         bundle.mkdir(parents=True)
         shutil.copy2(TOOL, bundle / TOOL.name)
+        for name in ('sdlc_common.py', 'sdlc-constants.json'):
+            shutil.copy2(TOOL.parent / name, bundle / name)
         # Resolve canonical source from repository rather than rely on any generated copy.
         contract = Path(__file__).resolve().parents[1] / 'implementations/runner-contract'
         shutil.copy2(contract / 'tools/state_contract.py', bundle / 'state_contract.py')
         shutil.copytree(contract / 'schemas', bundle / 'state_contract/schemas')
         (self.run / 'state.json').write_text(json.dumps(self.state))
         result = subprocess.run([sys.executable, str(bundle / TOOL.name), '--at', 'verify',
-                                 str(self.root), 'SCHED-101'], capture_output=True, text=True)
+                                 str(self.root), 'SCHED-101'], capture_output=True, text=True, encoding='utf-8')
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_state_print_action_and_unsupported_projection(self):

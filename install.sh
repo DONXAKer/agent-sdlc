@@ -2,8 +2,8 @@
 # Единственная команда установки скиллов и агентов Agent-SDLC в глобальный ~/.claude.
 # Семантика честной синхронизации (одна на README, CLAUDE.md и e2e-раннер):
 #   - расходящиеся глобальные версии СНАЧАЛА бэкапятся в ~/.claude/sdlc-backup-<время>/;
-#   - sdlc-* скиллы заменяются целиком, агенты sdlc-*.md — так же (симлинки заменяются,
-#     а не перезаписываются сквозь);
+#   - sdlc-* скиллы заменяются целиком, агенты sdlc-*.md и hooks sdlc-*.py — так же (симлинки
+#     заменяются, а не перезаписываются сквозь);
 #   - СИРОТЫ (sdlc-* сущности, которых больше нет в репо, включая файлы-тёзки скиллов)
 #     детектятся, бэкапятся и удаляются;
 #   - кэш-мусор игнорируется при сверке и вычищается из установки при каждом запуске.
@@ -13,6 +13,7 @@ set -euo pipefail
 IMPL="$(cd "$(dirname "$0")/implementations/claude-code" && pwd)"
 SKILLS_DST="$HOME/.claude/skills"
 AGENTS_DST="$HOME/.claude/agents"
+HOOKS_DST="$HOME/.claude/hooks"
 # Единый список кэш-мусора живёт в junk-names.sh: сверка (-x) и зачистка (find) строятся
 # из него циклами — расширение списка расширяет обе автоматически
 source "$(cd "$(dirname "$0")" && pwd)/junk-names.sh"
@@ -36,7 +37,7 @@ cleanup_junk() {
 }
 
 # --- один проход детекта: списки расходящихся и сирот -------------------------------------------
-stale_skills=(); stale_agents=(); orphan_skills=(); orphan_agents=()
+stale_skills=(); stale_agents=(); orphan_skills=(); orphan_agents=(); stale_hooks=(); orphan_hooks=()
 for src in "$IMPL/skills/"sdlc-*/; do
   [ -e "$src" ] || continue
   name=$(basename "$src")
@@ -51,6 +52,17 @@ for src in "$IMPL/agents/"sdlc-*.md; do
   if [ -L "$AGENTS_DST/$name" ]; then stale_agents+=("$name"); continue; fi
   diff -q "$src" "$AGENTS_DST/$name" >/dev/null 2>&1 || stale_agents+=("$name")
 done
+for src in "$IMPL/hooks/"sdlc-*.py; do
+  [ -e "$src" ] || continue
+  name=$(basename "$src")
+  if [ -L "$HOOKS_DST/$name" ]; then stale_hooks+=("$name"); continue; fi
+  diff -q "$src" "$HOOKS_DST/$name" >/dev/null 2>&1 || stale_hooks+=("$name")
+done
+for dst in "$HOOKS_DST/"sdlc-*.py; do
+  [ -e "$dst" ] || continue
+  name=$(basename "$dst")
+  [ -f "$IMPL/hooks/$name" ] || orphan_hooks+=("$name")
+done
 for dst in "$SKILLS_DST/"sdlc-*; do   # без слэша: ловим и файлы-тёзки скиллов
   [ -e "$dst" ] || continue
   name=$(basename "$dst")
@@ -64,8 +76,8 @@ for dst in "$AGENTS_DST/"sdlc-*.md; do
   [ -f "$IMPL/agents/$name" ] || orphan_agents+=("$name")
 done
 
-total=$(( ${#stale_skills[@]} + ${#stale_agents[@]} + ${#orphan_skills[@]} + ${#orphan_agents[@]} ))
-orphans="${orphan_skills[*]:-}${orphan_skills[*]:+ }${orphan_agents[*]:-}"
+total=$(( ${#stale_skills[@]} + ${#stale_agents[@]} + ${#orphan_skills[@]} + ${#orphan_agents[@]} + ${#stale_hooks[@]} + ${#orphan_hooks[@]} ))
+orphans="${orphan_skills[*]:-}${orphan_skills[*]:+ }${orphan_agents[*]:-}${orphan_agents[*]:+ }${orphan_hooks[*]:-}"
 
 if [ "${1:-}" = "--check" ]; then
   if [ "$total" -eq 0 ]; then echo "глобальные sdlc-* совпадают с репозиторием"; exit 0; fi
@@ -81,7 +93,7 @@ if [ "$total" -eq 0 ]; then
 fi
 
 BK="$HOME/.claude/sdlc-backup-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$SKILLS_DST" "$AGENTS_DST"
+mkdir -p "$SKILLS_DST" "$AGENTS_DST" "$HOOKS_DST"
 backed=0
 # скиллы: бэкап расходящихся и сирот, затем удаление целиком (симлинки и файлы-тёзки — тоже)
 for name in "${stale_skills[@]:-}" "${orphan_skills[@]:-}"; do
@@ -95,6 +107,12 @@ for name in "${stale_agents[@]:-}" "${orphan_agents[@]:-}"; do
   mkdir -p "$BK/agents"; cp "$AGENTS_DST/$name" "$BK/agents/"; backed=1
   rm -f "$AGENTS_DST/$name"
 done
+# hooks: та же семантика, что у агентов
+for name in "${stale_hooks[@]:-}" "${orphan_hooks[@]:-}"; do
+  [ -n "$name" ] && [ -e "$HOOKS_DST/$name" ] || continue
+  mkdir -p "$BK/hooks"; cp "$HOOKS_DST/$name" "$BK/hooks/"; backed=1
+  rm -f "$HOOKS_DST/$name"
+done
 # установка точечно, с guard'ами от пустых глобов (репо без агентов не рвёт скрипт)
 for src in "$IMPL/skills/"sdlc-*/; do
   [ -e "$src" ] || continue
@@ -104,7 +122,11 @@ for src in "$IMPL/agents/"sdlc-*.md; do
   [ -e "$src" ] || continue
   cp "$src" "$AGENTS_DST/"
 done
+for src in "$IMPL/hooks/"sdlc-*.py; do
+  [ -e "$src" ] || continue
+  cp "$src" "$HOOKS_DST/"
+done
 cleanup_junk
-echo "установлено: скиллы и агенты sdlc-* из $IMPL"
+echo "установлено: скиллы, агенты и hooks sdlc-* из $IMPL (hook подключается в settings.json — см. README реализации)"
 [ -z "$orphans" ] || echo "удалены сироты: $orphans"
 [ "$backed" -eq 1 ] && echo "бэкап прежних глобальных версий: $BK" || true

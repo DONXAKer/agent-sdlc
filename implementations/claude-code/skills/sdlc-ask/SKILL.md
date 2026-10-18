@@ -1,7 +1,17 @@
 ---
 name: sdlc-ask
-description: Этап 3 Agent-SDLC — вопросы. Задаёт человеку только то, что нельзя добыть из кода, через AskUserQuestion, закрывает ответы в задаче и пишет clarification-report.md. Шаг условный — нет развилок, нет шага.
+description: "Этап 3 Agent-SDLC — вопросы. Задаёт человеку только то, что нельзя добыть из кода, через AskUserQuestion, закрывает ответы в задаче и пишет clarification-report.md. Шаг условный — нет развилок, нет шага."
+allowed-tools: Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(python:*)
 ---
+
+## Контракт этапа
+
+- **Вход:** `intent.md`, `exploration-report.md` (развилки)
+- **Выход:** `clarification-report.md`; закрытые вопросы в `intent.md`
+- **Паузы человека:** ответы на развилки через `AskUserQuestion`
+- **Инструменты:** читать, спрашивать, записывать; оболочка — только `python` инструментов методологии (раскладка бланка)
+- **Останов:** блокирующий вопрос без ответа — не стартуем
+- **Дальше:** `/sdlc-plan <slug>`
 
 `отфильтровать добываемое из кода → AskUserQuestion по развилкам → закрыть ответы в задаче → отчёт`
 
@@ -56,8 +66,12 @@ description: Этап 3 Agent-SDLC — вопросы. Задаёт челове
 
 ## Phase 4 — Отчёт
 
-Скопируй `templates/clarification-report.template.md` из директории этого скилла в
-`.sdlc/<slug>/clarification-report.md` и заполни: таблица вопросов с колонками «Блокирующий»,
+<!-- runner:skip -->
+Разложи бланк — `python ~/.claude/skills/sdlc-verify/tools/scaffold.py <корень проекта> clarification-report <slug>`
+(нет установки — `templates/clarification-report.template.md` из директории этого скилла) — в
+`.sdlc/<slug>/clarification-report.md`.
+<!-- /runner:skip -->
+Заполни `.sdlc/<slug>/clarification-report.md`: таблица вопросов с колонками «Блокирующий»,
 «Ответ человека», «Что изменилось в задаче»; затем «Уточнённое требование и подход» — точная
 переформулировка с учётом ответов, **сохраняющая исходное намерение**, без переинтерпретации;
 затем «Отложено».

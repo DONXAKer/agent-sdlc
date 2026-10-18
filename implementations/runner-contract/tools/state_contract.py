@@ -12,6 +12,10 @@ import sys
 import hashlib
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):  # глифы ✅/❌ в выводе, Windows-консоль cp1251
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 STATE_VERSION = "agent-sdlc/state/v1"
 REVIEW_VERSION = "agent-sdlc/verify-review/v1"
 CLAIM_RE = re.compile(r"claim-[1-9][0-9]*$")

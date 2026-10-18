@@ -27,9 +27,17 @@ e6e963e) проверялись ручным прогоном по пяти ви
 """
 
 import difflib
+import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+# diff несёт глифы ✅/❌ — на Windows-консоли (cp1251) writelines падал до сравнения кейсов
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = Path(__file__).resolve().parent
 CORPUS = HERE / "flow-verdict-corpus"
@@ -38,12 +46,36 @@ FLOW_VERDICT = (HERE.parent / "implementations" / "claude-code" / "skills"
 
 
 def run_case(case_dir: Path) -> str:
-    slug = case_dir.name
-    proc = subprocess.run(
-        [sys.executable, str(FLOW_VERDICT), "--at", "verify", str(case_dir), slug],
-        capture_output=True, text=True,
-    )
-    return proc.stdout + proc.stderr
+    """Кейс — самодостаточный корень `.sdlc/…`. Необязательный `case.json` рядом:
+    {"mode": "verify"|"handoff", "source": "<каталог с плоскими артефактами>", "slug": "<slug>"}.
+    `source` — для канонических артефактов, которые лежат не в раскладке `.sdlc/` (example/):
+    они материализуются во временный корень, копия в корпусе не заводится — иначе пример и
+    его копия разъезжались бы молча."""
+    meta = {}
+    if (case_dir / "case.json").exists():
+        meta = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
+    mode = meta.get("mode", "verify")
+    slug = meta.get("slug", case_dir.name)
+    root, tmp = case_dir, None
+    if "source" in meta:
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        src = (case_dir / meta["source"]).resolve()
+        (root / ".sdlc" / slug).mkdir(parents=True)
+        for f in src.iterdir():
+            if f.is_file():
+                dst = root / ".sdlc" / ("gates.md" if f.name == "gates.md" else f"{slug}/{f.name}")
+                shutil.copy(f, dst)
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(FLOW_VERDICT), "--at", mode, str(root), slug],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        out = proc.stdout + proc.stderr
+    finally:
+        if tmp:
+            tmp.cleanup()
+    return out
 
 
 def main() -> int:

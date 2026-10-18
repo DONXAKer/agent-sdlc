@@ -1,0 +1,20 @@
+{
+  "tool": "attempt-evidence.py",
+  "version": 2,
+  "chunk": 1,
+  "attempt": 1,
+  "base_sha": "0000000",
+  "diff_sha256": "x",
+  "diff_empty": false,
+  "tests_cmd": "true",
+  "tests_exit": 0,
+  "missing_tool": null,
+  "diffstat": {
+    "files": 12,
+    "added": 700,
+    "deleted": 250,
+    "paths": [],
+    "deleted_paths": [],
+    "per_file": {}
+  }
+}

@@ -66,9 +66,12 @@ allowed-tools: Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(python:*)
 
 ## Phase 4 — Отчёт
 
+<!-- runner:skip -->
 Разложи бланк — `python ~/.claude/skills/sdlc-verify/tools/scaffold.py <корень проекта> clarification-report <slug>`
 (нет установки — `templates/clarification-report.template.md` из директории этого скилла) — в
-`.sdlc/<slug>/clarification-report.md` и заполни: таблица вопросов с колонками «Блокирующий»,
+`.sdlc/<slug>/clarification-report.md`.
+<!-- /runner:skip -->
+Заполни `.sdlc/<slug>/clarification-report.md`: таблица вопросов с колонками «Блокирующий»,
 «Ответ человека», «Что изменилось в задаче»; затем «Уточнённое требование и подход» — точная
 переформулировка с учётом ответов, **сохраняющая исходное намерение**, без переинтерпретации;
 затем «Отложено».

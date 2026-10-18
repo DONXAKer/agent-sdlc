@@ -420,9 +420,12 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         nums = attempt_nums(j)
         v.check(bool(nums), f"в журнале chunk-{n} есть строки попыток",
                 "таблица «Попытки» пуста", "счёт попыток не ведётся")
-        v.check(nums == list(range(1, len(nums) + 1)),
+        # та же K подряд законна после blocked_env (SDLC.md → «blocked_env в этот счёт не входит»):
+        # повтор номера — не дубль, дыра — по-прежнему затёртая попытка
+        uniq = sorted(set(nums))
+        v.check(uniq == list(range(1, len(uniq) + 1)) and nums == sorted(nums),
                 f"нумерация попыток chunk-{n} непрерывна", f"номера: {nums}",
-                "дыра/дубль в номерах: затёртая попытка — или строка с ‹…› в ячейке даты")
+                "дыра в номерах или номер не по порядку: затёртая попытка — или строка с ‹…› в ячейке даты")
         for k in nums:  # по фактическим номерам из таблицы, не по range
             v.check((d / f"chunk-{n}-attempt-{k}-diff.patch").exists(),
                     f"diff chunk-{n} попытки {k} сохранён", "файла нет",

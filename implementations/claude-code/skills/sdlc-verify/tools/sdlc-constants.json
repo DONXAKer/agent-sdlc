@@ -215,12 +215,6 @@
     ]
   ],
   "overwrite_threshold_percent": 50,
-  "model_order": [
-    "haiku",
-    "sonnet",
-    "opus",
-    "fable"
-  ],
   "defect_classes": [
     "инвертированное условие",
     "отключённый тест",

@@ -240,7 +240,6 @@ CONSUMERS = {
     "defect_actions": lambda: all(a in templates_text for a in C["defect_actions"]),
     "verdict_table": lambda: True,
     "overwrite_threshold_percent": lambda: '"overwrite_threshold_percent"' in py_text,
-    "model_order": lambda: " < ".join(C["model_order"]) in skills_text,
     "defect_classes": lambda: all(cls in sdlc for cls in C["defect_classes"]),
 }
 for key in C:

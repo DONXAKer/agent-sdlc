@@ -30,7 +30,8 @@ from sdlc_common import ARTIFACTS_DIR, CLAIM_RE  # noqa: E402
 ALWAYS_ALLOWED = {"Что придётся тронуть", "Открытые вопросы"}
 CLAIMS_SECTION = "Приёмочный лист"
 APPROVAL_RE = re.compile(r"уточнен[оа]\s+с\s+одобрения\s+\S+", re.I)
-CLAIM_ROW = re.compile(r"^\|\s*(claim-\d+)\b[^|]*\|(.*)$", re.M)
+# строка листа и в обратных кавычках (`claim-3 [edge]`) — так её пишут шаблон и раннер
+CLAIM_ROW = re.compile(r"^\s*\|\s*`?(claim-\d+)\b[^|]*\|(.*)$", re.M)
 
 
 def sections(text: str):

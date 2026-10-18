@@ -52,7 +52,6 @@ DEFAULT_BUDGET = int(CONSTANTS.get("attempt_default_budget", 3))
 CHUNK_LINES = int((CONSTANTS.get("chunk_size_guideline") or {}).get("changed_lines", 400))
 CHUNK_FILES = int((CONSTANTS.get("chunk_size_guideline") or {}).get("files", 8))
 OVERWRITE_PERCENT = int(CONSTANTS.get("overwrite_threshold_percent", 50))
-MODEL_ORDER = list(CONSTANTS.get("model_order") or ["haiku", "sonnet", "opus", "fable"])
 
 
 def claims_in(text) -> set:

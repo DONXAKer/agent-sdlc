@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import ARTIFACTS_DIR, emit, files_to_touch, git_out, read  # noqa: E402
+import snapshot_base
 
 GATE = "Scope: нетракованные файлы"
 
@@ -29,8 +30,15 @@ def main() -> int:
     if out is None:
         return emit(GATE, "skip", [], "git недоступен — исполнить нечем", missing_tool="git")
     planned = set(files_to_touch(read(root / ARTIFACTS_DIR / slug / "plan.md", "")))
+    original = {}
+    try:
+        if snapshot_base.kind_of(read(root / ARTIFACTS_DIR / slug / 'plan.md', '')) == 'snapshot':
+            _, original = snapshot_base.load(root, root / ARTIFACTS_DIR / slug)
+    except ValueError as error:
+        return emit(GATE, 'fail', [str(error)], 'База нетракованных файлов не подтверждена')
     paths = [p for p in out.splitlines() if p.strip() and not p.startswith(ARTIFACTS_DIR + "/")]
-    unexplained = [p for p in paths if p not in planned]
+    unexplained = [p for p in paths if p not in planned and not
+                   (p in original and (root / p).is_file() and (root / p).read_bytes() == original[p][0])]
     if unexplained:
         return emit(GATE, "fail", unexplained,
                     f"{len(unexplained)} нетракованных путей вне files_to_touch — объяснить или добавить в .gitignore")

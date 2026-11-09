@@ -3,8 +3,9 @@
 
   python base-check.py <корень> <slug> <n> <k> [--tests-cmd "<команда>"]
 
-1. **Чужие падающие тесты.** Полный прогон команды «Тесты» на чистом дереве `base_sha`
-   (временный `git worktree`). Тест, красный на базе, — не регрессия chunk'а, а условие
+1. **Чужие падающие тесты.** Полный прогон команды «Тесты» на выбранной базе:
+   Git `base_sha` во временном worktree либо исходные байты snapshot во временном каталоге.
+   Тест, красный на базе, — не регрессия chunk'а, а условие
    «падает тест, причина которого не в текущих изменениях» из SDLC.md → «Когда остановиться
    и спросить». Список печатается как `base_failures`.
 2. **Гейт «Тесты красные на базе».** На ту же базу накладываются только hunk'и тестовых файлов
@@ -24,6 +25,8 @@ import re
 import shutil
 import sys
 import tempfile
+import hashlib
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -32,6 +35,7 @@ from _common import emit  # noqa: E402
 from sdlc_common import (  # noqa: E402
     ARTIFACTS_DIR, git_run, is_test_path, missing_tool, read, require_base_sha, require_tests_cmd, run_shell,
 )
+import snapshot_base
 
 GATE = "Тесты красные на базе"
 FAIL_LINE = re.compile(
@@ -76,22 +80,39 @@ def main() -> int:
     root, slug, n, k = Path(a.root).resolve(), a.slug, a.n, a.k
     d = root / ARTIFACTS_DIR / slug
     base = require_base_sha(read(d / "plan.md", ""))
+    try:
+        selected_base, snapshot = snapshot_base.load(root, d)
+        evidence = json.loads(read(d / f'chunk-{n}-attempt-{k}-evidence.json', '{}'))
+        if snapshot is not None or evidence.get('base', {}).get('kind') == 'snapshot':
+            if evidence.get('base') != selected_base:
+                raise ValueError('База отличается от evidence попытки')
+    except ValueError as error:
+        return emit(GATE, 'fail', [str(error)], 'Не удалось подтвердить базу попытки')
     tests_cmd = a.tests_cmd or require_tests_cmd(read(root / ARTIFACTS_DIR / "gates.md", ""))
     patch_path = d / f"chunk-{n}-attempt-{k}-diff.patch"
     if not patch_path.exists():
         return emit(GATE, "skip", [], f"нет {patch_path.name} — проверять нечего")
     patch_text = patch_path.read_bytes().decode("utf-8", errors="surrogateescape")
+    if snapshot is not None and evidence.get('diff_sha256') != hashlib.sha256(patch_path.read_bytes()).hexdigest():
+        return emit(GATE, 'fail', [], 'Патч изменён после записи evidence')
     tests_patch = test_only_patch(patch_text)
     if shutil.which("git") is None:
         return emit(GATE, "skip", [], "git недоступен — исполнить нечем", missing_tool="git")
     with tempfile.TemporaryDirectory() as tmp:
         wt = Path(tmp) / "base"
-        rc, _, err = git_run(["worktree", "add", "--detach", str(wt), base], root)
+        if snapshot is None:
+            rc, _, err = git_run(["worktree", "add", "--detach", str(wt), base], root)
+        else:
+            wt.mkdir()
+            snapshot_base.materialize(snapshot, wt)
+            rc, _, err = git_run(['init', '-q'], wt)
         if rc != 0:
             return emit(GATE, "skip", [err.strip()[:200]], "worktree на базе не создан — исполнить нечем",
                         missing_tool="git worktree")
         try:
-            rc_clean, out_clean = run_shell(tests_cmd, wt)
+            # Изменённый тест той же длины не должен прочитать pyc от первого прогона.
+            test_env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+            rc_clean, out_clean = run_shell(tests_cmd, wt, env=test_env)
             tool_missing = missing_tool(out_clean, tests_cmd, rc_clean)
             fails_clean = failures_of(out_clean)
             info = {"base_exit": rc_clean, "base_failures": sorted(fails_clean)[:50],
@@ -110,10 +131,11 @@ def main() -> int:
                 rc_ap, _, err = git_run(["apply", str(tp)], wt)
             if rc_ap != 0:
                 return emit(GATE, "skip", [err.strip()[:200]], "тестовые hunk'и не легли на базу — проверить нечем")
-            rc_tests, out_tests = run_shell(tests_cmd, wt)
+            rc_tests, out_tests = run_shell(tests_cmd, wt, env=test_env)
         finally:
-            git_run(["worktree", "remove", "--force", str(wt)], root)
-            git_run(["worktree", "prune"], root)
+            if snapshot is None:
+                git_run(["worktree", "remove", "--force", str(wt)], root)
+                git_run(["worktree", "prune"], root)
     fails_tests = failures_of(out_tests)
     new_failures = sorted(fails_tests - fails_clean)
     info.update({"tests_on_base": rc_tests, "new_failures": new_failures[:50]})

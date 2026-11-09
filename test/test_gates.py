@@ -100,6 +100,12 @@ class CommonTests(unittest.TestCase):
 
 
 class ScopeTests(Base):
+    def test_git_mode_accepts_custom_patch_filename(self):
+        generated = self.write_patch({'src/app.py': (['old'], ['new'])})
+        custom = self.d / 'custom.patch'
+        custom.write_bytes(generated.read_bytes())
+        self.assertEqual(run('scope.py', 'outside', self.root, 'S-1', custom)[0], 0)
+
     def test_outside_plan_fails_and_sdlc_is_excluded(self):
         p = self.write_patch({"src/app.py": (["a"], ["b"]), "src/other.py": (["x"], ["y"]),
                               ".sdlc/S-1/chunk-1-journal.md": (None, ["j"])})

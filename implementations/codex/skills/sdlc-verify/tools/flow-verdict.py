@@ -30,6 +30,7 @@ from sdlc_common import (  # noqa: E402  — константы и разбор:
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
     gate_configuration_errors,
 )
+import snapshot_base
 
 DEFAULT_BUDGET = str(_DEFAULT_BUDGET)  # норма SDLC.md → этап 6; шаблон журнала сверяет tools/check-consistency.py
 
@@ -689,6 +690,13 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     # этап 6), поэтому chunk'у приписывается ПРИРАЩЕНИЕ: его последняя попытка минус последняя
     # попытка предыдущего chunk'а. Свидетельств нет — проверять нечего, и это не провал.
     by_chunk = {}
+    selected_base = None
+    try:
+        if snapshot_base.kind_of(plan) == 'snapshot':
+            selected_base, _ = snapshot_base.load(root, d)
+            v.check(True, 'снимок базы сохранён и цел', '', '')
+    except ValueError as error:
+        v.fail('снимок базы сохранён и цел', str(error), 'восстанови исходный снимок; не подменяй базу')
     for ev in natsorted(d.glob("chunk-*-attempt-*-evidence.json")):
         m = re.match(r"chunk-(\d+)-attempt-(\d+)-evidence\.json", ev.name)
         try:
@@ -696,6 +704,10 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         except json.JSONDecodeError:
             v.fail(f"свидетельство {ev.name} читается", "не JSON", "evidence.json пишет инструмент, не агент")
             continue
+        if selected_base is not None or rec.get('base', {}).get('kind') == 'snapshot':
+            v.check(selected_base is not None and rec.get('base') == selected_base,
+                    f'база {ev.name} совпадает с планом', 'вид или хэш базы изменён',
+                    'все попытки витка используют один снимок')
         if m:
             by_chunk.setdefault(int(m.group(1)), {})[int(m.group(2))] = rec.get("diffstat") or {}
     explained = bool(re.search(r"почему этот chunk больше ориентира", plan or ""))

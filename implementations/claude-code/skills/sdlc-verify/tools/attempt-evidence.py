@@ -26,6 +26,14 @@ SDLC.md → «Свидетельства производит программа
     Это хэши, а не снимок исходных байтов. Прежние и текущие правки одного файла не разделяются.
     Для такого файла до правок согласуй отдельную Git-базу либо изолированное рабочее дерево.
 
+Режим снимка рабочего дерева (явный **Вид базы:** snapshot в плане):
+  python attempt-evidence.py snapshot <корень> <slug>
+    Сохраняет исходные байты до первой правки в base-snapshot, закрепляет SHA-256 manifest в плане.
+    Все chunk и попытки используют один снимок. Существующий снимок не заменяется.
+    write/verify, scope и base-check проверяют его целость и связь с evidence.
+    В snapshot-режиме патч содержит только изменения относительно снимка, включая untracked и binary.
+    Игнорируемые untracked, .sdlc и cache/junk исключаются. Symlink и submodule отклоняются.
+
 Режим сравнения попыток (этап 5, Phase 0 — детект отсутствия прогресса):
   python attempt-evidence.py compare <корень> <slug> <n> <k1> <k2>
     JSON: identical, similarity 0..1, changed_files.
@@ -52,6 +60,7 @@ from sdlc_common import (  # noqa: E402
     ARTIFACTS_DIR, diffstat, git_out, git_run, is_junk_path, missing_tool, read, require_base_sha,
     require_tests_cmd, run_shell, sha256,
 )
+import snapshot_base
 
 TOOL = "attempt-evidence.py"
 VERSION = 2
@@ -89,13 +98,20 @@ def paths_for(d: Path, n: str, k: str):
 def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model, force: bool) -> int:
     d = root / ARTIFACTS_DIR / slug
     base_sha = require_base_sha(read(d / "plan.md", ""))
+    base, snapshot = snapshot_base.load(root, d)
     tests_cmd = tests_cmd or require_tests_cmd(read(root / ARTIFACTS_DIR / "gates.md", ""))
     patch, tests_out, evidence = paths_for(d, n, k)
     if not force and any(p.exists() for p in (patch, tests_out, evidence)):
         print(f"попытка {k} chunk'а {n} уже имеет свидетельства — они не перезаписываются "
               f"(следующая попытка = следующий номер; --force только осознанно)")
         return 1
-    diff = regenerate_diff(root, base_sha)
+    # История всех попыток должна ссылаться на один и тот же вид и идентификатор базы.
+    for previous in d.glob('chunk-*-attempt-*-evidence.json'):
+        record = json.loads(read(previous, '{}'))
+        previous_base = record.get('base', {'kind': 'git', 'id': record.get('base_sha')})
+        if previous_base != base:
+            raise ValueError('База отличается от истории попыток; создай новый виток')
+    diff = regenerate_diff(root, base_sha) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot)
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rc, output = run_shell(tests_cmd, root)
     missing = missing_tool(output, tests_cmd, rc)
@@ -106,6 +122,7 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         "tool": TOOL, "version": VERSION, "generated_at": started,
         "slug": slug, "chunk": int(n), "attempt": int(k),
         "base_sha": base_sha, "head_sha": (git_out(["rev-parse", "HEAD"], root) or "").strip(),
+        "base": base,
         "diff_sha256": sha256(diff), "diff_empty": not diff.strip(), "diffstat": diffstat(diff),
         "tests_cmd": tests_cmd, "tests_exit": rc, "tests_sha256": sha256(output),
         "tests_last_line": last_line[:200], "missing_tool": missing,
@@ -169,15 +186,18 @@ def compare_mode(root: Path, slug: str, n: str, k1: str, k2: str) -> int:
 def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
     d = root / ARTIFACTS_DIR / slug
     base_sha = require_base_sha(read(d / "plan.md", ""))
+    base, snapshot = snapshot_base.load(root, d)
     patch, tests_out, evidence = paths_for(d, n, k)
     if not patch.exists():
         print(json.dumps({"error": f"нет {patch.name} — верификация не начинается"}, ensure_ascii=False))
         return 2
-    current = regenerate_diff(root, base_sha)
+    current = regenerate_diff(root, base_sha) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot)
     patch_text = read_bytes_text(patch)
     patch_hash = sha256(patch_text)
     rec = json.loads(evidence.read_text(encoding="utf-8")) if evidence.exists() else None
     result = {
+        "base_matches_evidence": rec is not None and rec.get('base', {'kind': 'git', 'id': rec.get('base_sha')}) == base,
+        "base": base,
         "diff_matches_tree": sha256(current) == patch_hash,
         "evidence_present": rec is not None,
         "patch_matches_evidence": rec is not None and rec.get("diff_sha256") == patch_hash,
@@ -190,7 +210,7 @@ def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
         "produced_by": (rec or {}).get("tool", "не программой — файлы написал агент, свидетельством не считаются"),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["diff_matches_tree"] else 1
+    return 0 if result["diff_matches_tree"] and result['base_matches_evidence'] else 1
 
 
 def main() -> int:
@@ -200,7 +220,7 @@ def main() -> int:
         argv = ["verify"] + argv[1:]
     elif argv and argv[0] == "--compare":
         argv = ["compare"] + argv[1:]
-    elif argv and argv[0] not in ("write", "baseline", "compare", "verify", "-h", "--help"):
+    elif argv and argv[0] not in ("write", "baseline", "snapshot", "compare", "verify", "-h", "--help"):
         argv = ["write"] + argv
     ap = argparse.ArgumentParser(prog=TOOL, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -209,6 +229,8 @@ def main() -> int:
     w.add_argument("--tests-cmd"); w.add_argument("--executor-model"); w.add_argument("--force", action="store_true")
     b = sub.add_parser("baseline")
     b.add_argument("root"); b.add_argument("slug"); b.add_argument("n")
+    s = sub.add_parser('snapshot')
+    s.add_argument('root'); s.add_argument('slug')
     c = sub.add_parser("compare")
     c.add_argument("root"); c.add_argument("slug"); c.add_argument("n"); c.add_argument("k1"); c.add_argument("k2")
     v = sub.add_parser("verify")
@@ -218,6 +240,9 @@ def main() -> int:
     except SystemExit:
         return 2
     root = Path(a.root).resolve()
+    if a.mode == 'snapshot':
+        print(json.dumps({'kind': 'snapshot', 'id': snapshot_base.create(root, root / ARTIFACTS_DIR / a.slug)}))
+        return 0
     if a.mode == "write":
         return write_mode(root, a.slug, a.n, a.k, a.tests_cmd, a.executor_model, a.force)
     if a.mode == "baseline":
@@ -228,4 +253,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except ValueError as error:
+        print(json.dumps({'error': str(error)}, ensure_ascii=False))
+        sys.exit(1)

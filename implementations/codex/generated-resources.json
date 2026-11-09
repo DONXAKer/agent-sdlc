@@ -41,6 +41,7 @@
   "implementations/codex/skills/sdlc-verify/tools/scaffold.py",
   "implementations/codex/skills/sdlc-verify/tools/sdlc-constants.json",
   "implementations/codex/skills/sdlc-verify/tools/sdlc_common.py",
+  "implementations/codex/skills/sdlc-verify/tools/snapshot_base.py",
   "implementations/codex/skills/sdlc-verify/tools/state_contract.py",
   "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json",
   "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
@@ -80,6 +81,7 @@
   "implementations/cursor/skills/sdlc-verify/tools/scaffold.py",
   "implementations/cursor/skills/sdlc-verify/tools/sdlc-constants.json",
   "implementations/cursor/skills/sdlc-verify/tools/sdlc_common.py",
+  "implementations/cursor/skills/sdlc-verify/tools/snapshot_base.py",
   "implementations/cursor/skills/sdlc-verify/tools/state_contract.py",
   "implementations/cursor/skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json",
   "implementations/cursor/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json"

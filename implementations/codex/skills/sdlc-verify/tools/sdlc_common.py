@@ -332,14 +332,14 @@ def git_bash():
     return None if not b or "system32" in b.lower() else b
 
 
-def run_shell(cmd: str, cwd):
+def run_shell(cmd: str, cwd, env=None):
     """(rc, вывод). На Windows — через Git Bash, если он есть: команды наборов пишутся в POSIX-стиле
     (`./gradlew`, `make -C`), и cmd.exe их не исполняет."""
     bash = git_bash()
     if bash:
-        proc = subprocess.run([bash, "-c", cmd], cwd=cwd, capture_output=True)
+        proc = subprocess.run([bash, "-c", cmd], cwd=cwd, capture_output=True, env=env)
     else:
-        proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True)
+        proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, env=env)
     return proc.returncode, decode_console(proc.stdout + proc.stderr)
 
 

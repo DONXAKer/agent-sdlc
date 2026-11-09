@@ -12,6 +12,8 @@
 формулировок («не потребовалось, потому что …» / «не сделано») — скрипт лишь называет список,
 разбор — за исполнителем и рецензентом. Пустой список — pass.
 Контракт вывода — см. _common.py.
+В режиме snapshot патч уже содержит только текущий слой. Снимок и его digest из evidence
+проверяются до scope; исключение по старым baseline-хэшам в этом режиме не применяется.
 """
 
 import hashlib
@@ -20,7 +22,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import ARTIFACTS_DIR, emit, files_to_touch, patch_files, read  # noqa: E402
+from _common import ARTIFACTS_DIR, emit, files_to_touch, patch_files, read, sha256  # noqa: E402
+import snapshot_base
 
 
 def main() -> int:
@@ -29,11 +32,25 @@ def main() -> int:
         return 2
     mode, root, slug, patch_path = sys.argv[1], Path(sys.argv[2]).resolve(), sys.argv[3], Path(sys.argv[4])
     plan = read(root / ARTIFACTS_DIR / slug / "plan.md", "")
+    try:
+        snapshot_mode = snapshot_base.kind_of(plan) == 'snapshot'
+        evidence = {}
+        if patch_path.name.endswith('-diff.patch'):
+            evidence_path = patch_path.with_name(patch_path.name[:-len('-diff.patch')] + '-evidence.json')
+            evidence = json.loads(read(evidence_path, '{}'))
+        if snapshot_mode or evidence.get('base', {}).get('kind') == 'snapshot':
+            selected_base, _ = snapshot_base.load(root, root / ARTIFACTS_DIR / slug)
+            patch_hash = sha256(patch_path.read_bytes().decode('utf-8', errors='surrogateescape'))
+            if evidence.get('base') != selected_base or evidence.get('diff_sha256') != patch_hash:
+                raise ValueError('Патч scope не связан со снимком в evidence')
+    except ValueError as error:
+        return emit('Scope: файлы вне плана' if mode == 'outside' else 'Scope: пути плана без правок',
+                    'fail', [str(error)], 'База scope не подтверждена')
     planned = files_to_touch(plan)
     touched = [f["path"] for f in patch_files(read(patch_path, "")) if not f["path"].startswith(ARTIFACTS_DIR + "/")]
     if mode == "outside":
         gate = "Scope: файлы вне плана"
-        baselines = sorted((root / ARTIFACTS_DIR / slug).glob(".chunk-*-baseline.json"))
+        baselines = [] if snapshot_mode else sorted((root / ARTIFACTS_DIR / slug).glob(".chunk-*-baseline.json"))
         base = {}
         for b in baselines:
             try:

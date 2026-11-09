@@ -7,3 +7,4 @@ __pycache__/
 
 # Архивы распространяются через dist/ и GitHub Releases.
 /implementations/agent-sdlc-codex.zip
+/implementations/agent-sdlc-kimi-code.zip

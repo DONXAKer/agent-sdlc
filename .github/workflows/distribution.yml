@@ -20,6 +20,7 @@ jobs:
           python-version: '3.11'
       - run: python tools/distribution.py sync
       - run: python implementations/codex/test_package.py
+      - run: python implementations/kimi-code/test_package.py
       - name: Проверить актуальность ресурсов
         run: python tools/distribution.py check
       - run: python check.py
@@ -44,6 +45,7 @@ jobs:
           python-version: '3.11'
       - run: python tools/distribution.py sync
       - run: python implementations/codex/test_package.py
+      - run: python implementations/kimi-code/test_package.py
       - uses: peter-evans/create-pull-request@v7
         with:
           branch: automation/sdlc-resources
@@ -60,6 +62,8 @@ jobs:
             implementations/codex/generated-resources.json
             implementations/cursor/skills/**
             implementations/cursor/manifest.json
+            implementations/kimi-code/skills/**
+            implementations/kimi-code/manifest.json
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -80,7 +84,7 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS --verify-tag --title "$GITHUB_REF_NAME" --notes "Комплекты Agent-SDLC для Codex и Claude Code."
+            gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS --verify-tag --title "$GITHUB_REF_NAME" --notes "Комплекты Agent-SDLC для Codex, Claude Code и Kimi Code."
           fi
       - name: Подготовить OCI-пакет
         run: cp packages/Dockerfile dist/Dockerfile

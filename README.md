@@ -18,7 +18,7 @@
    этапа 5 (diff и вывод тестов) в пример не включены — они порождаются кодовой базой витка.
 3. **[`templates/`](templates/)** — канонические формы документов витка.
    Копии внутри реализаций служат для установки. Изменяй исходные формы, затем запускай
-   `python tools/distribution.py sync`, чтобы обновить оба комплекта.
+   `python tools/distribution.py sync`, чтобы обновить установочные копии.
 4. **[`implementations/`](implementations/)** — готовые реализации методологии на конкретных
    инструментах.
 5. **[`model-runs/`](model-runs/)** — результирующие карточки моделей: какая модель какой
@@ -47,20 +47,21 @@ PASS означает ожидаемое поведение, включая ко
 Для Cursor доступен [комплект навыков, агентов и правил](implementations/cursor/README.md).
 Установи его командой `python implementations/cursor/install-cursor.py <корень проекта>`.
 
-Выбери реализацию под свой инструмент. Комплекты Codex и Claude Code находятся в этом репозитории.
+Выбери реализацию под свой инструмент. Комплекты Codex, Claude Code и Kimi Code находятся в этом репозитории.
 Runner развивается отдельно. Каталог `runner-contract/` содержит контракт и проверяющие инструменты для рантайма.
 
 | Вариант | Что это | Статус |
 |---|---|---|
 | [Codex](implementations/codex/README.md) | Десять скиллов `$sdlc-*`: общий запуск `$sdlc-run`, семь этапов, посев и ретроспектива. Четыре роли. Установка в проект или домашний каталог | Переносимый Markdown-флоу без Runner. Есть автоматические проверки комплекта. Живой полный виток Codex пока не подтверждён |
 | [Claude Code](implementations/claude-code/README.md) | Девять скиллов `/sdlc-*`: семь этапов, посев и ретроспектива. Четыре субагента и hook. Установка в `~/.claude/` | Есть сквозной пример и e2e-раннер. Hook требует подключения в настройках проекта; его ограничения описаны в README реализации |
+| [Kimi Code](implementations/kimi-code/README.md) | Десять навыков `/skill:sdlc-*`: общий запуск `/skill:sdlc-run`, семь этапов, посев и ретроспектива. Четыре роли. Установка в проект или домашний каталог | Самостоятельный комплект с автоматическими проверками установки и ZIP. Обнаружение навыков и агентов подтверждено; живой полный виток пока не подтверждён |
 | Agent-SDLC-Runner, отдельный репозиторий | Сервис с UI, политикой доступа, программным запуском гейтов и вычислением вердикта. Поддерживает Claude Agent SDK и собственный цикл вызова инструментов | Результаты запусков опубликованы в [model-runs/](model-runs/). State-first требует явного включения и адаптера; прежние витки автоматически не мигрируют |
 | [Контракт Runner](implementations/runner-contract/README.md) | Схемы `state.json`, формат ревью и reference-проверки состояния, свидетельств и вердикта | Это контракт для исполнителя. Изоляцию, запуск команд и происхождение решений должен обеспечить конкретный рантайм |
 
-В обоих комплектах роли `sdlc-claims`, `sdlc-locator`, `sdlc-reviewer` и `sdlc-methodologist`
+В комплектах роли `sdlc-claims`, `sdlc-locator`, `sdlc-reviewer` и `sdlc-methodologist`
 отвечают за слепой вывод приёмочного листа, разведку, ревью и разбор методологии.
-В Codex отдельный агент разделяет контекст, но не создаёт отдельную песочницу.
-Защиты Claude Code hook и Runner в комплект Codex не входят.
+В Codex и Kimi Code отдельный агент разделяет контекст, но не создаёт отдельную песочницу.
+Защиты Claude Code hook и Runner в переносимые комплекты не входят.
 
 State-first Runner хранит каноническое состояние в `state.json`.
 Независимая приёмка использует защищённый набор проверок и одноразовые Docker-контейнеры.
@@ -91,7 +92,7 @@ State-first Runner хранит каноническое состояние в `
 не стартует: команда сборки, команда тестов, сверка diff со списком файлов из плана, проверка
 на обход тестов и ревью независимым агентом. Остальное включается поверх; чего ещё нет — живёт в долге набора с подписью.
 
-Готовые комплекты для Codex и Claude Code покрывают семь этапов, калибровку гейтов посевом и ретроспективу методологии.
+Готовые комплекты для Codex, Claude Code и Kimi Code покрывают семь этапов, калибровку гейтов посевом и ретроспективу методологии.
 Для мелких правок используй правила раздела «Мелкий виток» в [`SDLC.md`](SDLC.md).
 Команды установки приведены ниже.
 
@@ -112,8 +113,8 @@ cd agent-sdlc
 [«Комплекты SDLC»](https://github.com/DONXAKer/agent-sdlc/actions/workflows/distribution.yml).
 Релиз появляется после публикации тега `v<версия>`. Артефакты создаются при успешной сборке workflow.
 
-Внутри комплекта Codex установщик лежит в корне. После распаковки перейди в `agent-sdlc-codex/`
-и замени `python implementations/codex/install-codex.py` в командах ниже на `python install-codex.py`.
+Внутри комплектов Codex и Kimi Code установщик лежит в корне. После распаковки перейди в `agent-sdlc-codex/` или `agent-sdlc-kimi-code/`
+и замени команду установки из соответствующего раздела ниже на `python install-codex.py` или `python install-kimi-code.py`.
 Для Claude Code перейди в `agent-sdlc-claude-code/` и выполни те же команды `bash install.sh`.
 Файл `SHA256SUMS` содержит контрольные суммы ZIP.
 
@@ -128,6 +129,7 @@ docker pull ghcr.io/donxaker/agent-sdlc:<версия>
 docker create --name agent-sdlc ghcr.io/donxaker/agent-sdlc:<версия>
 docker cp agent-sdlc:/packages/agent-sdlc-codex.zip .
 docker cp agent-sdlc:/packages/agent-sdlc-claude-code.zip .
+docker cp agent-sdlc:/packages/agent-sdlc-kimi-code.zip .
 docker cp agent-sdlc:/packages/SHA256SUMS .
 docker rm agent-sdlc
 ```
@@ -187,6 +189,25 @@ bash install.sh --check
 Подключи hook в настройках проекта по [инструкции Claude Code](implementations/claude-code/README.md#установка).
 Открой новую сессию Claude Code в проекте и начни с `/sdlc-intent demo`.
 
+### Kimi Code
+
+Требуются Python 3.11+, Git и авторизованный Kimi Code с поддержкой пользовательских агентов и навыков.
+Установщик добавляет десять навыков и четыре роли.
+
+```bash
+python implementations/kimi-code/install-kimi-code.py --doctor
+python implementations/kimi-code/install-kimi-code.py --project "/путь/к/проекту"
+python implementations/kimi-code/install-kimi-code.py --project "/путь/к/проекту" --check
+```
+
+Для пользовательской установки замени `--project ...` на `--user`.
+Проектная установка размещает навыки в `.kimi-code/skills/`, а роли — в `.kimi-code/agents/`.
+Отличающиеся файлы сохраняются в `.kimi-code/sdlc-backup-*`; чужие навыки, агенты и настройки сохраняются.
+Открой новую сессию Kimi Code или выполни `/reload`, затем запусти `/skill:sdlc-run demo` с явным корнем проекта и описанием задачи.
+Для продолжения этого витка вызови `/skill:sdlc-run demo` с тем же корнем.
+
+Подробнее: [комплект Kimi Code](implementations/kimi-code/README.md), включая ограничения и проверку установки.
+
 ### Как обновить комплект
 
 В исходном клоне выполни `git pull --ff-only`. Затем повтори установку и проверку для выбранного инструмента.
@@ -201,12 +222,14 @@ bash install.sh --check
 ```bash
 python tools/distribution.py sync
 python implementations/codex/test_package.py
+python implementations/kimi-code/test_package.py
 python check.py
 python tools/distribution.py package
 ```
 
-Команда `sync` обновляет установочные ресурсы Claude Code, копирует общие ресурсы в Codex и пересчитывает манифест Codex.
-Тексты скиллов и роли остаются отдельными для каждой реализации.
+Команда `sync` обновляет установочные ресурсы Claude Code, копирует общие ресурсы в Codex, Cursor и Kimi Code,
+преобразует навыки Codex для Cursor и Kimi Code и пересчитывает манифесты Codex, Cursor и Kimi Code.
+Исходные тексты навыков и роли остаются отдельными для каждой реализации.
 Команда `package` проверяет актуальность ресурсов и упаковывает текущие файлы.
 Она не синхронизирует ресурсы и не запускает полный набор тестов.
 
@@ -214,6 +237,7 @@ python tools/distribution.py package
 
 - `agent-sdlc-codex.zip` — самостоятельный комплект Codex;
 - `agent-sdlc-claude-code.zip` — комплект Claude Code с установщиком;
+- `agent-sdlc-kimi-code.zip` — самостоятельный комплект Kimi Code;
 - `SHA256SUMS` — контрольные суммы архивов.
 
 Каждый архив содержит `build.json` с ревизией Git, версией и контрольными суммами файлов.

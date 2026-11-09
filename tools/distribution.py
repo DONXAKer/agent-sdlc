@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CLAUDE = Path('implementations/claude-code')
 CODEX = Path('implementations/codex')
 CURSOR = Path('implementations/cursor')
+KIMI = Path('implementations/kimi-code')
 TEMPLATES = {
     'intent': ('intent',), 'gates': ('intent',),
     'readiness': ('intent', 'plan'), 'exploration-report': ('explore',),
@@ -82,11 +83,17 @@ def generated(root):
         path = Path('templates') / (name + '.template.md')
         desired[CODEX / 'skills/sdlc-verify/templates' / path.name] = canonical_bytes(root / path)
     desired[CODEX / 'skills/sdlc-run/references/SDLC.md'] = canonical_bytes(root / 'SDLC.md')
+    codex_skills = selected_files(root, [name for name in inventory(root)['codex'] if Path(name).is_relative_to(CODEX / 'skills')], desired)
     # Cursor использует те же ресурсы. Меняются только обращения к среде и вызовы навыков.
-    for path, data in selected_files(root, [name for name in inventory(root)['codex'] if Path(name).is_relative_to(CODEX / 'skills')], desired).items():
+    for path, data in codex_skills.items():
         if path.name == 'SKILL.md':
             data = data.decode('utf-8').replace('Codex', 'Cursor').replace('$sdlc-', '/sdlc-').encode('utf-8')
         desired[CURSOR / path.relative_to(CODEX)] = data
+    # Kimi Code дополнительно получает абсолютные ссылки на ресурсы через KIMI_SKILL_DIR.
+    for path, data in codex_skills.items():
+        if path.name == 'SKILL.md':
+            data = data.decode('utf-8').replace('Общий контракт Codex', 'Общий контракт Kimi Code').replace('../sdlc-', '${KIMI_SKILL_DIR}/../sdlc-').encode('utf-8')
+        desired[KIMI / path.relative_to(CODEX)] = data
     return desired
 
 
@@ -97,7 +104,7 @@ def sync(root=ROOT, check=False):
     if (root / RESOURCE_RECORD).exists():
         owned = {Path(p) for p in json.loads((root / RESOURCE_RECORD).read_text(encoding='utf-8'))}
     for path in owned:
-        if '..' in path.parts or path.is_absolute() or not any(path.is_relative_to(p / 'skills') for p in (CLAUDE, CODEX, CURSOR)):
+        if '..' in path.parts or path.is_absolute() or not any(path.is_relative_to(p / 'skills') for p in (CLAUDE, CODEX, CURSOR, KIMI)):
             raise ValueError(f'Недопустимый путь ресурса: {path}')
     stale = owned - desired.keys()
     desired[RESOURCE_RECORD] = encoded(sorted(p.as_posix() for p in desired))
@@ -119,6 +126,15 @@ def sync(root=ROOT, check=False):
         cursor_files[name] = canonical_bytes(root / CURSOR / name)
     desired[CURSOR / 'manifest.json'] = encoded({'version': manifest['version'], 'files': {
         name: hashlib.sha256(data).hexdigest() for name, data in sorted(cursor_files.items())}})
+    kimi_files = {p.relative_to(KIMI).as_posix(): data for p, data in desired.items() if p.is_relative_to(KIMI)}
+    for name in inventory(root)['kimi-code']:
+        path = Path(name)
+        if path.is_relative_to(KIMI / 'skills') or path == KIMI / 'manifest.json':
+            continue
+        kimi_files[path.relative_to(KIMI).as_posix()] = canonical_bytes(root / path)
+    desired.update({KIMI / name: data for name, data in kimi_files.items()})
+    desired[KIMI / 'manifest.json'] = encoded({'version': manifest['version'], 'files': {
+        name: hashlib.sha256(data).hexdigest() for name, data in sorted(kimi_files.items())}})
     changes = [p for p, data in desired.items() if not (root / p).is_file() or (root / p).read_bytes() != data]
     removed = [p for p in stale if (root / p).exists()]
     if check:
@@ -150,9 +166,9 @@ def package(root=ROOT, revision=None):
     dest.mkdir(exist_ok=True)
     version = json.loads((root / CODEX / 'manifest.json').read_text(encoding='utf-8'))['version']
     archives = []
-    for variant, base in (('codex', CODEX), ('claude-code', CLAUDE)):
+    for variant, base in (('codex', CODEX), ('claude-code', CLAUDE), ('kimi-code', KIMI)):
         payload = selected_files(root, inventory(root)[variant])
-        if variant == 'codex':
+        if variant in ('codex', 'kimi-code'):
             entries = {p.relative_to(base).as_posix(): data for p, data in payload.items()}
         else:
             entries = {p.as_posix(): data for p, data in payload.items()}

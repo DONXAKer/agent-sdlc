@@ -32,6 +32,19 @@ class DistributionTests(unittest.TestCase):
         for name in changes:
             self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns), name)
 
+    def test_automation_includes_generated_kimi_code_changes(self):
+        before = self.snapshot()
+        source = self.root / 'SDLC.md'
+        source.write_bytes(source.read_bytes() + b'\n')
+        distribution.sync(self.root)
+        changes = [path.as_posix() for path, data in self.snapshot().items()
+                   if before.get(path) != data and path.is_relative_to(distribution.KIMI)]
+        workflow = (ROOT / '.github/workflows/distribution.yml').read_text(encoding='utf-8')
+        patterns = [line.strip() for line in workflow.split('add-paths: |', 1)[1].split('  release:', 1)[0].splitlines()]
+        self.assertTrue(changes)
+        for name in changes:
+            self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns), name)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='sdlc-distribution-')
         self.addCleanup(self.temp.cleanup)
@@ -104,8 +117,21 @@ class DistributionTests(unittest.TestCase):
         subprocess.run([sys.executable, str(dest / '.agents/skills/sdlc-verify/tools/flow-verdict.py'),
                         '--metrics', str(dest)], check=True)
 
+    def test_kimi_code_archive_installs_without_checkout(self):
+        archives = {path.name: path for path in distribution.package(self.root, revision='test-revision')}
+        unpacked = Path(self.temp.name) / 'kimi-распаковано'
+        with zipfile.ZipFile(archives['agent-sdlc-kimi-code.zip']) as archive:
+            self.assertIsNone(archive.testzip())
+            archive.extractall(unpacked)
+        install = unpacked / 'agent-sdlc-kimi-code/install-kimi-code.py'
+        dest = Path(self.temp.name) / 'kimi-установка'
+        subprocess.run([sys.executable, str(install), '--project', str(dest)], check=True)
+        subprocess.run([sys.executable, str(install), '--project', str(dest), '--check'], check=True)
+        subprocess.run([sys.executable, str(dest / '.kimi-code/skills/sdlc-verify/tools/flow-verdict.py'),
+                        '--metrics', str(dest)], check=True)
+
     def test_unowned_templates_survive_with_and_without_record(self):
-        for variant in (distribution.CLAUDE, distribution.CODEX):
+        for variant in (distribution.CLAUDE, distribution.CODEX, distribution.KIMI):
             for name in ('notes.txt', 'custom.template.md'):
                 path = self.root / variant / 'skills/sdlc-verify/templates' / name
                 path.write_bytes(b'private notes')
@@ -116,38 +142,46 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual(before, {p: p.read_bytes() for p in before})
 
     def test_unlisted_files_never_enter_manifest_or_archives(self):
-        for variant in (distribution.CLAUDE, distribution.CODEX):
+        for variant in (distribution.CLAUDE, distribution.CODEX, distribution.KIMI):
             for name in ('.env', 'skills/sdlc-verify/templates/private.md', 'skills/sdlc-verify/tools/local.py'):
                 path = self.root / variant / name
                 path.write_bytes(b'LOCAL_SECRET_SENTINEL')
         distribution.sync(self.root)
-        manifest = json.loads((self.root / distribution.CODEX / 'manifest.json').read_text(encoding='utf-8'))
-        self.assertNotIn('.env', manifest['files'])
+        for variant in (distribution.CODEX, distribution.KIMI):
+            manifest = json.loads((self.root / variant / 'manifest.json').read_text(encoding='utf-8'))
+            self.assertNotIn('.env', manifest['files'])
         for archive in distribution.package(self.root, revision='test-revision'):
             with zipfile.ZipFile(archive) as zipped:
                 for name in zipped.namelist():
                     self.assertNotIn(b'LOCAL_SECRET_SENTINEL', zipped.read(name))
 
     def test_standalone_package_excludes_unlisted_files(self):
-        base = self.root / distribution.CODEX
-        (base / '.env').write_bytes(b'LOCAL_SECRET_SENTINEL')
-        subprocess.run([sys.executable, str(base / 'package.py')], check=True)
-        with zipfile.ZipFile(base.parent / 'agent-sdlc-codex.zip') as archive:
-            self.assertNotIn('agent-sdlc-codex/.env', archive.namelist())
-            self.assertIsNone(archive.testzip())
+        for variant, archive_name in ((distribution.CODEX, 'agent-sdlc-codex.zip'),
+                                      (distribution.KIMI, 'agent-sdlc-kimi-code.zip')):
+            base = self.root / variant
+            (base / '.env').write_bytes(b'LOCAL_SECRET_SENTINEL')
+            subprocess.run([sys.executable, str(base / 'package.py')], check=True)
+            with zipfile.ZipFile(base.parent / archive_name) as archive:
+                self.assertNotIn(archive_name[:-4] + '/.env', archive.namelist())
+                self.assertIsNone(archive.testzip())
 
     def test_crlf_sync_survives_lf_checkout(self):
         listing = distribution.inventory(self.root)
-        for name in set(listing['codex'] + listing['claude-code']):
+        for name in set(listing['codex'] + listing['claude-code'] + listing['kimi-code']):
             path = self.root / name
             if path.exists():
                 path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
         distribution.sync(self.root)
+        for name in listing['kimi-code']:
+            path = self.root / name
+            if path.exists():
+                self.assertNotIn(b'\r\n', path.read_bytes(), name)
         for path in self.root.rglob('*'):
             if path.is_file():
                 path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n'))
         self.assertTrue(distribution.sync(self.root, check=True))
         subprocess.run([sys.executable, str(self.root / distribution.CODEX / 'test_package.py')], check=True)
+        subprocess.run([sys.executable, str(self.root / distribution.KIMI / 'test_package.py')], check=True)
 
     def test_windows_legacy_stdout_encoding(self):
         env = dict(os.environ, PYTHONUTF8='0', PYTHONIOENCODING='cp1252:strict')
@@ -159,6 +193,8 @@ class DistributionTests(unittest.TestCase):
             [str(tools / 'distribution.py'), 'check'],
             [str(self.root / distribution.CODEX / 'test_package.py')],
             [str(self.root / distribution.CODEX / 'package.py')],
+            [str(self.root / distribution.KIMI / 'test_package.py')],
+            [str(self.root / distribution.KIMI / 'package.py')],
         ]
         for args in commands:
             result = subprocess.run([sys.executable, *args], env=env,

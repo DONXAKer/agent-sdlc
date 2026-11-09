@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "tool": "attempt-evidence.py prepare",
+  "status": "ready",
+  "slug": "review-md-ignored",
+  "chunk": 1,
+  "base": {
+    "kind": "git",
+    "id": "1234567"
+  },
+  "plan_sha256": "b27a772e01895ff6246b89ccd006b3afb68d2454399d6f0037ac86ac8ad3b663",
+  "locator": {
+    "path": "locator-1.md",
+    "sha256": "e53ee45e5926996869dcc470884e90b34a4ea6c5c994550a95e1639b37813cc2"
+  },
+  "baseline_sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+  "initial_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "recorded_at": "2000-01-01T00:00:00+00:00",
+  "plan_path": ".chunk-1-plan.md"
+}

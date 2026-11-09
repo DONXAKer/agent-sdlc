@@ -1,0 +1,111 @@
+"""Квитанция предусловий: связывает раннюю подготовку с базой и свидетельствами попыток."""
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+import snapshot_base
+from sdlc_common import files_to_touch, patch_files, read
+
+
+def receipt_path(d, n):
+    return d / f'.chunk-{n}-preconditions.json'
+
+
+def text_digest(path):
+    return snapshot_base.digest(path.read_text(encoding='utf-8').encode('utf-8'))
+
+
+def artifact(d, name):
+    path = Path(name)
+    target = d / path
+    if path.is_absolute() or '..' in path.parts or not target.resolve().is_relative_to(d.resolve()):
+        raise ValueError('Артефакт предусловий должен находиться внутри витка')
+    if not target.is_file():
+        raise ValueError(f'Артефакт предусловий отсутствует: {name}')
+    return target
+
+
+def create(root, d, n, locator, current_diff, capture_baseline):
+    target = receipt_path(d, n)
+    if target.exists() or list(d.glob(f'chunk-{n}-attempt-*')):
+        raise ValueError('Квитанция уже существует или попытки начаты; поздняя запись не доказывает порядок')
+    plan = read(d / 'plan.md', '')
+    planned = set(files_to_touch(plan))
+    if not planned:
+        raise ValueError('План не содержит files_to_touch; предусловия не доказаны')
+    base, _ = snapshot_base.load(root, d)
+    locator_path = artifact(d, locator)
+    if not locator_path.read_bytes().strip():
+        raise ValueError('Отчёт locator пуст')
+    if int(n) == 1:
+        touched = {record['path'] for record in patch_files(current_diff)}
+        if touched & planned:
+            raise ValueError('До квитанции уже изменены пути плана; порядок не доказан. Сохрани отклонение в журнале')
+    else:
+        previous = list(d.glob(f'chunk-{int(n) - 1}-attempt-*-evidence.json'))
+        if not previous:
+            raise ValueError('Нет evidence предыдущего chunk; порядок подготовки не доказан')
+        previous.sort(key=lambda path: int(path.name.split('-')[3]))
+        rec = json.loads(previous[-1].read_text(encoding='utf-8'))
+        previous_base = rec.get('base', {'kind': 'git', 'id': rec.get('base_sha')})
+        patch = previous[-1].with_name(previous[-1].name.replace('-evidence.json', '-diff.patch'))
+        if (previous_base != base or snapshot_base.digest(current_diff.encode('utf-8', errors='surrogateescape')) != rec.get('diff_sha256')
+                or not patch.is_file() or snapshot_base.digest(patch.read_bytes()) != rec.get('diff_sha256')):
+            raise ValueError('Дерево отличается от предыдущей попытки; поздняя подготовка не доказывает порядок')
+    baseline = d / f'.chunk-{n}-baseline.json'
+    if not baseline.exists():
+        capture_baseline()
+    original = json.loads(baseline.read_text(encoding='utf-8'))
+    for name, digest in original.items():
+        path = snapshot_base.safe_path(root, name)
+        if not path.is_file() or snapshot_base.digest(path.read_bytes()) != digest:
+            raise ValueError('Dirty-база изменилась после baseline; предусловия не доказаны')
+    record = {'version': 1, 'tool': 'attempt-evidence.py prepare', 'status': 'ready',
+              'slug': d.name, 'chunk': int(n), 'base': base,
+              'plan_sha256': text_digest(d / 'plan.md'),
+              'locator': {'path': locator, 'sha256': text_digest(locator_path)},
+              'baseline_sha256': text_digest(baseline),
+              'initial_diff_sha256': snapshot_base.digest(current_diff.encode('utf-8', errors='surrogateescape')),
+              'recorded_at': datetime.now(timezone.utc).isoformat(timespec='seconds')}
+    plan_archive = d / f'.chunk-{n}-plan.md'
+    if plan_archive.exists() and text_digest(plan_archive) != record['plan_sha256']:
+        raise ValueError('Историческая редакция плана уже существует и отличается')
+    if not plan_archive.exists():
+        with plan_archive.open('xb') as output:
+            output.write((d / 'plan.md').read_bytes())
+    record['plan_path'] = plan_archive.name
+    with target.open('x', encoding='utf-8') as output:
+        json.dump(record, output, ensure_ascii=False, indent=2)
+        output.write('\n')
+    return record
+
+
+def errors(root, d, n, expected_hash=None, historical=False):
+    """Не используй время файлов как доказательство. Проверяй связи и неизменность входов."""
+    target = receipt_path(d, n)
+    if not target.is_file():
+        return ['Нет программной квитанции предусловий; подпись не доказывает порядок locator/baseline']
+    try:
+        raw = target.read_bytes()
+        rec = json.loads(raw)
+        if expected_hash is not None and snapshot_base.digest(raw) != expected_hash:
+            return ['Квитанция изменена после записи evidence']
+        if (rec.get('version') != 1 or rec.get('tool') != 'attempt-evidence.py prepare' or rec.get('status') != 'ready'
+                or rec.get('slug') != d.name or rec.get('chunk') != int(n)):
+            return ['Недопустимая квитанция предусловий']
+        base, _ = snapshot_base.load(root, d)
+        archived = artifact(d, rec['plan_path'])
+        if rec.get('plan_sha256') != text_digest(archived):
+            return ['Историческая редакция плана изменена']
+        if rec.get('base') != base or (not historical and rec.get('plan_sha256') != text_digest(d / 'plan.md')):
+            return ['База или план изменились после квитанции']
+        locator = rec['locator']
+        if text_digest(artifact(d, locator['path'])) != locator['sha256']:
+            return ['Отчёт locator изменился после квитанции']
+        baseline = artifact(d, f'.chunk-{n}-baseline.json')
+        if text_digest(baseline) != rec.get('baseline_sha256'):
+            return ['Baseline изменился после квитанции']
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+        return [f'Квитанция предусловий не подтверждена: {error}']
+    return []

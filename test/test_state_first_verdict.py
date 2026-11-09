@@ -89,7 +89,7 @@ class StateFirstVerdictTests(unittest.TestCase):
         bundle = self.root / 'installed/tools'
         bundle.mkdir(parents=True)
         shutil.copy2(TOOL, bundle / TOOL.name)
-        for name in ('sdlc_common.py', 'sdlc-constants.json', 'snapshot_base.py'):
+        for name in ('sdlc_common.py', 'sdlc-constants.json', 'snapshot_base.py', 'chunk_preconditions.py'):
             shutil.copy2(TOOL.parent / name, bundle / name)
         # Resolve canonical source from repository rather than rely on any generated copy.
         contract = Path(__file__).resolve().parents[1] / 'implementations/runner-contract'

@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / 'implementations/claude-code/skills/sdlc-verify/tools'
 sys.path.insert(0, str(TOOLS))
 import snapshot_base
+sys.path.insert(0, str(ROOT))
+from test.evidence_fixtures import parser_receipt
 
 
 class SnapshotTests(unittest.TestCase):
@@ -149,6 +151,7 @@ class SnapshotTests(unittest.TestCase):
         shutil.copyfile(ROOT / 'test/flow-verdict-corpus/green/.sdlc/gates.md', self.root / '.sdlc/gates.md')
         self.plan.write_text(self.plan.read_text(encoding='utf-8') +
                              f'\n- **Вид базы:** snapshot\n- **Хэш снимка:** {pin}\n', encoding='utf-8')
+        parser_receipt(self.d)
         result = self.tool('flow-verdict.py', '--at', 'verify', self.root, 'T-1')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         evidence = self.d / 'chunk-1-attempt-1-evidence.json'

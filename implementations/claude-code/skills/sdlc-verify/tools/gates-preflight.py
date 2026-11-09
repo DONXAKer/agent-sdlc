@@ -14,6 +14,7 @@ SDLC.md → «Набор гейтов проекта»: «Runner-реализа�
 Ничего не запускает.
 
   python gates-preflight.py <корень проекта> [--stage "этап 6"] [--json]
+  Для контекстного закрытия долга передай --slug <текущий виток>. Без slug такое закрытие не подтверждается.
 Код возврата: 0 — исполнители доступны; 1 — отсутствует инструмент или ошибочна конфигурация;
 2 — набора нет. Встроенное ревью регистрирует вызывающая среда флагом --builtin-review.
 """
@@ -62,12 +63,12 @@ def script_of(parts: list):
     return None
 
 
-def preflight(root: Path, stage: str = "этап 6", builtin_review=False):
+def preflight(root: Path, stage: str = "этап 6", builtin_review=False, slug=None):
     gates = root / ARTIFACTS_DIR / "gates.md"
     if not gates.exists():
         return None
     rows = [{"gate": name, "command": None, "status": "invalid-command", "detail": detail}
-            for name, detail in gate_configuration_errors(read(gates, ""))]
+            for name, detail in gate_configuration_errors(read(gates, ""), root=root, slug=slug)]
     for name, _, how in enabled_gates(read(gates, ""), stage):
         cmd = command_of(how)
         if cmd is None:
@@ -101,12 +102,13 @@ def main() -> int:
     ap.add_argument("root"); ap.add_argument("--stage", default="этап 6"); ap.add_argument("--json", action="store_true")
     ap.add_argument("--builtin-review", action="store_true",
                     help="Вызывающая среда зарегистрировала доступного независимого агента ревью")
+    ap.add_argument('--slug', help='Текущий виток для проверки области закрытия долга')
     try:
         a = ap.parse_args()
     except SystemExit:
         return 2
     root = Path(a.root).resolve()
-    rows = preflight(root, a.stage, a.builtin_review)
+    rows = preflight(root, a.stage, a.builtin_review, a.slug)
     if rows is None:
         print(f"нет {root / ARTIFACTS_DIR / 'gates.md'} — набор не собран, виток не стартует")
         return 2

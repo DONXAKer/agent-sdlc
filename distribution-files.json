@@ -1,5 +1,6 @@
 {
   "shared_tools": [
+    "implementations/claude-code/skills/sdlc-verify/tools/chunk_preconditions.py",
     "implementations/claude-code/skills/sdlc-verify/tools/snapshot_base.py",
     "implementations/claude-code/skills/sdlc-verify/tools/attempt-evidence.py",
     "implementations/claude-code/skills/sdlc-verify/tools/base-check.py",
@@ -21,6 +22,7 @@
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json"
   ],
   "codex": [
+    "implementations/codex/skills/sdlc-verify/tools/chunk_preconditions.py",
     "implementations/codex/skills/sdlc-verify/tools/snapshot_base.py",
     "implementations/codex/README.md",
     "implementations/codex/agents/sdlc-claims.toml",
@@ -73,6 +75,7 @@
     "implementations/codex/test_package.py"
   ],
   "claude-code": [
+    "implementations/claude-code/skills/sdlc-verify/tools/chunk_preconditions.py",
     "implementations/claude-code/skills/sdlc-verify/tools/snapshot_base.py",
     "implementations/claude-code/README.md",
     "implementations/claude-code/agents/sdlc-claims.md",

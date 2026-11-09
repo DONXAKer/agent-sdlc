@@ -20,7 +20,7 @@ node:internal/modules/run_main:107
     triggerUncaughtException(
     ^
 
-file:///private/var/folders/sk/k4f53x5j0tl758s05k75mf100000gn/T/sdlc-bench-snap-f5w0Xw/test/oversize.test.ts:36
+file:///<temporary-project>/test/oversize.test.ts:36
     });
   });
    ^

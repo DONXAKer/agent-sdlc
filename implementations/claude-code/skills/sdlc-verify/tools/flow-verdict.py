@@ -31,6 +31,7 @@ from sdlc_common import (  # noqa: E402  — константы и разбор:
     gate_configuration_errors,
 )
 import snapshot_base
+import chunk_preconditions
 
 DEFAULT_BUDGET = str(_DEFAULT_BUDGET)  # норма SDLC.md → этап 6; шаблон журнала сверяет tools/check-consistency.py
 
@@ -87,9 +88,7 @@ def holes_in(text: str):
 
     Дыра засчитывается только парой ‹…›: голый ‹ без закрывающего › — упоминание самого
     символа в прозе («„grep -c '‹'" находит незаполненные места»), а не незаполненное
-    место (P5, retros/2026-08-28-CV.md) — на CV `.sdlc/gates.md:47` такая ячейка без
-    обратных кавычек (намеренно, чтобы раннер её не исполнял) давала ложный провал
-    на всех витках проекта."""
+    место. Ячейка с одиночным символом без обратных кавычек не должна давать ложный провал."""
     holes, fenced = [], False
     for ln in text.splitlines():
         if ln.lstrip().startswith("```"):
@@ -189,13 +188,10 @@ def row_glyphs(ln: str) -> set:
     selector U+FE0F (например `{"❌"}` или `{"⏭"}`); единственный источник этой
     нормализации в файле — вызывай отсюда, не копируй тело.
 
-    Живые отчёты оборачивают статус в bold (`**❌**`), в обратные кавычки (`` `⚠` ``,
-    так же принято ссылаться на глиф в прозе — `.sdlc/AUTH-103/verification-report-
-    1-attempt-4.md:45`), в курсив (`_❌_`) и иногда несут аннотацию рядом (`⚠ частично`,
+    Отчёты оборачивают статус в bold (`**❌**`), в обратные кавычки (`` `⚠` ``),
+    в курсив (`_❌_`) и иногда несут аннотацию рядом (`⚠ частично`,
     `⚠️` с variation selector U+FE0F) — точное совпадение «только пробелы и символ»
-    ловит форму из шаблона, но не эти реальные варианты (нашлось построчной сверкой
-    с `.sdlc/AUTH-103/verification-report-1-attempt-4.md:19` и `.sdlc/AUTH-102/
-    verification-report-1-attempt-3.md:30`). Сверяем по первому непробельному символу
+    ловит форму из шаблона, но не все допустимые варианты. Сверяем по первому непробельному символу
     ячейки после снятия обрамления — тот же компромисс (ложноотрицательный экзотический
     формат вместо ложноположительного совпадения в прозе), что `holes_in()` уже
     принимает для сканирования плейсхолдеров."""
@@ -273,8 +269,7 @@ def do_metrics(root: Path) -> int:
     """Наблюдения по всем виткам проекта. НЕ гейт: код возврата всегда 0, ничего не роняет —
     это вход `/sdlc-retro`, а не проверка витка. Норматив из этих чисел не делается
     (SDLC.md → «Долой лозунги и квоты» + Гудхарт): числа существуют, чтобы повтор одного
-    класса отказа был виден не только памяти человека между витками (P2, retros/
-    2026-08-28-CV.md — до этого режима методология не считала о себе ни одной цифры)."""
+    класса отказа был виден по сохранённым артефактам между витками."""
     sdlc = root / ".sdlc"
     if not sdlc.is_dir():
         print("нет .sdlc/ — метрик считать не из чего")
@@ -412,7 +407,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     texts = {p.name: read(p) for p in natsorted(d.glob("*.md"))}
     gates = read(sdlc / "gates.md")
     texts["gates.md"] = gates
-    for name, detail in gate_configuration_errors(gates):
+    for name, detail in gate_configuration_errors(gates, root=root, slug=slug):
         v.check(False, f"конфигурация гейта {name}", detail, "заполни состояние переключателя явно")
     intent = texts.get("intent.md")
     readiness = texts.get("readiness.md")
@@ -423,6 +418,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     last_report = texts.get(reports[-1].name) if reports else None
     diffs = natsorted(d.glob("chunk-*-attempt-*-diff.patch"))
     tests_out = natsorted(d.glob("chunk-*-attempt-*-tests.txt"))
+    current_chunk = max((int(journal_chunk_num(path) or 0) for path in journals), default=0)
 
     # --- 1. Артефакты на месте и непусты -----------------------------------------------------
     for name, obj, imp in [
@@ -477,8 +473,13 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         sig_line = next((ln for ln in j.splitlines() if "Подтвердил:" in ln), "")
         sig = sig_line.split("Подтвердил:", 1)[-1]
         v.check(bool(sig) and PLACEHOLDER not in strip_literal_spans(sig),
-                f"место правки подтверждено ({p.name})", "секция «Место правки» без подписи",
+                f"подпись места правки записана ({p.name})", "секция «Место правки» без подписи",
                 "подтверждение места правки не записывается — чинить /sdlc-chunk Phase 2")
+        n = journal_chunk_num(p)
+        if n is not None:
+            problems = chunk_preconditions.errors(root, d, n, historical=int(n) < current_chunk)
+            v.check(not problems, f'предусловия chunk-{n} подтверждены квитанцией', '; '.join(problems),
+                    'выполни prepare до правок; позднее отклонение сохрани явно, не объявляй порядок доказанным')
     if readiness:
         for n in (1, 2):
             ok_val = readiness_ok(readiness, n)
@@ -528,7 +529,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 "отчёт приёмки не покрывает лист 1:1")
     if intent:
         # [^|]* после id: строка листа несёт тег в той же ячейке — «| claim-5 [edge] | …» —
-        # жёсткое \s*\| после id эти строки не матчило (B1, retros/2026-08-27-CV.md)
+        # Жёсткое \s*\| после id пропускает строку с тегом в той же ячейке.
         rows = [ln for ln in intent.splitlines() if re.match(r"^\|\s*claim-\d+\b[^|]*\|", ln)]
         # позиционно: | id | Пункт | Как проверить | … — пустая третья колонка не компенсируется
         # заполненной четвёртой (опциональной GWT-колонкой)
@@ -600,8 +601,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
             if "⏭" in glyphs:
                 skipped_rows.append(ln)
         # «строк неприменимости нет» — фраза шаблона для пустой таблицы неприменимости; регистр
-        # и bold-обёртка варьируются в живых отчётах («**Строк неприменимости нет.**» —
-        # .sdlc/AUTH-102/verification-report-1-attempt-3.md:30), сверка регистронезависимая
+        # и bold-обёртка могут различаться. Сверка регистронезависимая.
         has_inapplicability = not re.search(r"строк\s+неприменимости\s+нет", last_report, re.I)
         unexcused_skips = skipped_rows and not has_inapplicability
         v.check(not (claimed == "true" and (bad_rows or unexcused_skips)),
@@ -708,6 +708,14 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
             v.check(selected_base is not None and rec.get('base') == selected_base,
                     f'база {ev.name} совпадает с планом', 'вид или хэш базы изменён',
                     'все попытки витка используют один снимок')
+        if m:
+            readiness = rec.get('preconditions') or {}
+            receipt_hash = readiness.get('receipt_sha256')
+            problems = chunk_preconditions.errors(root, d, m.group(1), expected_hash=receipt_hash,
+                                                 historical=int(m.group(1)) < current_chunk)
+            v.check(bool(receipt_hash) and not readiness.get('errors') and not problems,
+                    f'квитанция {ev.name} сохранена до попытки', '; '.join(problems) or 'квитанция не закреплена в evidence',
+                    'не создавай свидетельство готовности задним числом')
         if m:
             by_chunk.setdefault(int(m.group(1)), {})[int(m.group(2))] = rec.get("diffstat") or {}
     explained = bool(re.search(r"почему этот chunk больше ориентира", plan or ""))

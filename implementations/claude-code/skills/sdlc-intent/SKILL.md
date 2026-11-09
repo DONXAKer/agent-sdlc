@@ -35,7 +35,7 @@ allowed-tools: Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(git checkout
 
 ## Phase 0 — Где что лежит
 
-- Артефакты витка: `.sdlc/<slug>/` — slug из id задачи или короткого имени (`.sdlc/PAY-412/`).
+- Артефакты витка: `.sdlc/<slug>/` — slug из id задачи или короткого имени (`.sdlc/TASK-001/`).
 - Набор гейтов **проекта**: `.sdlc/gates.md` — один на проект, не на виток, меняется раз в месяцы.
 
 Определи slug из аргумента скилла или спроси одним вопросом. Если `.sdlc/<slug>/intent.md` уже

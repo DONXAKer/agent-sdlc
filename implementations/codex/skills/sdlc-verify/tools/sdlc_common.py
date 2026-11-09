@@ -98,7 +98,7 @@ def enabled(on_cell: str) -> bool:
     return bool(re.match(r"да(?!\w)", on_cell.strip()))
 
 
-def gate_configuration_errors(text: str):
+def gate_configuration_errors(text: str, root=None, slug=None):
     """Проверь переключатели только в таблице набора, без таблиц долга и журнала."""
     table, active = [], False
     for line in (text or '').splitlines():
@@ -118,7 +118,7 @@ def gate_configuration_errors(text: str):
             debt_active = False
         if debt_active:
             cells = [cell.strip().replace(r'\|', '|') for cell in re.split(r'(?<!\\)\|', line.strip().strip('|'))]
-            if len(cells) == 5:
+            if len(cells) in (5, 7):
                 debt[cells[0]] = cells[1:]
     errors = []
     rows = gate_rows('\n'.join(table))
@@ -136,6 +136,38 @@ def gate_configuration_errors(text: str):
                     or not re.match(r'^(?:проверяет руками|риск принят):\s*\S', record[1])
                     or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', record[2])):
                 errors.append((name, 'Выключенный гейт требует закрытия долга: способ, дата и ответственный'))
+            elif len(record) != 6:
+                errors.append((name, 'Старое закрытие долга не задаёт область; укажи виток или переносимый риск'))
+            else:
+                stage, how, date, who, scope, proof = record
+                if scope == 'проект':
+                    if not how.startswith('риск принят:') or not re.match(r'^пересмотр:\s*\S', proof):
+                        errors.append((name, 'Переносимый риск требует причину и условие «пересмотр:»'))
+                    if re.search(r'(?:\.sdlc/|artifact:)', how + ' ' + proof):
+                        errors.append((name, 'Результат другого витка не является переносимым риском'))
+                elif re.fullmatch(r'виток:[A-Za-z0-9][A-Za-z0-9._-]*', scope):
+                    scope_slug = scope.split(':', 1)[1]
+                    if root is not None and slug is None:
+                        errors.append((name, 'Контекстное закрытие долга требует текущий slug; передай --slug'))
+                    if slug is not None and scope_slug != slug:
+                        errors.append((name, f'Закрытие долга относится к другому витку: {scope_slug}'))
+                    if not proof.startswith('artifact:'):
+                        errors.append((name, 'Закрытие витка требует свидетельство artifact:<путь в витке>'))
+                    else:
+                        relative = Path(proof[len('artifact:'):].strip().strip('`'))
+                        if (relative.is_absolute() or '..' in relative.parts or not relative.parts
+                                or '\\' in str(relative) or ':' in str(relative)):
+                            errors.append((name, 'Путь свидетельства долга должен находиться внутри витка'))
+                        elif root is not None:
+                            directory = Path(root) / ARTIFACTS_DIR / scope_slug
+                            target = directory / relative
+                            if not target.resolve().is_relative_to(directory.resolve()) or not target.is_file():
+                                errors.append((name, 'Свидетельство закрытия долга отсутствует или выходит за виток'))
+                    referenced = re.findall(r'\.sdlc/([A-Za-z0-9._-]+)/', how + ' ' + proof)
+                    if any(other != scope_slug for other in referenced):
+                        errors.append((name, 'Закрытие долга ссылается на результат другого витка'))
+                else:
+                    errors.append((name, 'Область долга должна быть «виток:<slug>» или «проект»'))
     return errors
 
 

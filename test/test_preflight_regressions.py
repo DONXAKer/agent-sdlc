@@ -155,9 +155,9 @@ class PreflightRegressions(unittest.TestCase):
             self.assertEqual(code, 1, value)
             self.assertTrue(result['configuration_error'], value)
         for value in ('да', 'нет'):
-            debt = ('\n\n## Долг\n\n| Гейт | Где должен стоять | Как закрывается | Дата | Кто |\n'
-                    '|---|---|---|---|---|\n'
-                    '| Секреты в diff | этап 6 | риск принят: тестовая фикстура | 2026-11-09 | Тестовый оператор |')
+            debt = ('\n\n## Долг\n\n| Гейт | Где должен стоять | Как закрывается | Дата | Кто | Область | Свидетельство / условие пересмотра |\n'
+                    '|---|---|---|---|---|---|---|\n'
+                    '| Секреты в diff | этап 6 | риск принят: тестовая фикстура | 2026-11-09 | Тестовый оператор | проект | пересмотр: изменение фикстуры |')
             path.write_text(valid + f'\n| Секреты в diff | {value} | этап 6 | `git --version` |' + debt, encoding='utf-8')
             self.assertEqual(self.run_cli()[0], 0, value)
         path.write_text(valid + '\n| Секреты в diff | нет | этап 6 | н/п — долг |', encoding='utf-8')
@@ -169,9 +169,9 @@ class PreflightRegressions(unittest.TestCase):
         valid = path.read_text(encoding='utf-8')
         for reason in ('A и B', r'A \| B'):
             path.write_text(valid + '\n| Секреты в diff | нет | этап 6 | н/п — долг |\n\n'
-                            '## Долг\n\n| Гейт | Где должен стоять | Как закрывается | Дата | Кто |\n'
-                            '|---|---|---|---|---|\n'
-                            f'| Секреты в diff | этап 6 | риск принят: {reason}; вернуться после пилота | 2026-11-09 | Оператор |',
+                            '## Долг\n\n| Гейт | Где должен стоять | Как закрывается | Дата | Кто | Область | Свидетельство / условие пересмотра |\n'
+                            '|---|---|---|---|---|---|---|\n'
+                            f'| Секреты в diff | этап 6 | риск принят: {reason} | 2026-11-09 | Оператор | проект | пересмотр: изменение профиля |',
                             encoding='utf-8')
             self.assertEqual(self.run_cli()[0], 0, reason)
 

@@ -19,6 +19,13 @@ SDLC.md → «Свидетельства производит программа
       самоотчёт исполнителя, под раннером — факт рантайма; источник записывается рядом).
     Файлы попытки не перезаписываются: попытка K уже есть — отказ без --force.
 
+Режим готовности (до реализации каждого chunk):
+  python attempt-evidence.py prepare <корень> <slug> <n> --locator <отчёт внутри витка>
+    Создаёт .chunk-N-preconditions.json. Хэши связывают план, базу, locator и baseline.
+    Новые scoped-правки до prepare отклоняются; для следующего chunk требуется прежний evidence.
+    write сохраняет также отсутствие квитанции, чтобы честное отклонение не потерялось.
+    flow-verdict требует квитанцию и её закреплённый хэш; текстовая подпись не доказывает порядок.
+
 Режим базы (этап 5, Phase 2 /sdlc-chunk — перед первой правкой):
   python attempt-evidence.py baseline <корень> <slug> <n>
     Пишет `.chunk-<n>-baseline.json`: {путь → sha256 байтов} для всех изменённых и нетракованных
@@ -61,6 +68,7 @@ from sdlc_common import (  # noqa: E402
     require_tests_cmd, run_shell, sha256,
 )
 import snapshot_base
+import chunk_preconditions
 
 TOOL = "attempt-evidence.py"
 VERSION = 2
@@ -75,15 +83,18 @@ def read_bytes_text(path: Path) -> str:
     return path.read_bytes().decode("utf-8", errors="surrogateescape")
 
 
-def regenerate_diff(root: Path, base_sha: str) -> str:
+def regenerate_diff(root: Path, base_sha: str, canonical=True) -> str:
     """git diff от базы без .sdlc/** плюс новые нетракованные файлы (как добавленные)."""
-    rc, diff, err = git_run(["diff", base_sha, "--", ".", f":(exclude){ARTIFACTS_DIR}"], root)
+    formatting = (['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/',
+                   '--output-indicator-new=+', '--output-indicator-old=-', '--output-indicator-context= ']
+                  if canonical else [])
+    rc, diff, err = git_run(["diff", *formatting, base_sha, "--", ".", f":(exclude){ARTIFACTS_DIR}"], root)
     if rc != 0:
         raise SystemExit(f"git diff {base_sha}: код {rc}\n{err}")
     untracked = git_out(["ls-files", "--others", "--exclude-standard", "--", ".",
                          f":(exclude){ARTIFACTS_DIR}"], root) or ""
     for path in sorted(p for p in untracked.splitlines() if p.strip() and not is_junk_path(p)):
-        rc, out, err = git_run(["diff", "--no-index", "--", "/dev/null", path], root)
+        rc, out, err = git_run(["diff", "--no-index", *formatting, "--", "/dev/null", path], root)
         if rc not in (0, 1):
             raise SystemExit(f"git diff --no-index {path}: код {rc}\n{err}")
         diff += out
@@ -123,6 +134,9 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         "slug": slug, "chunk": int(n), "attempt": int(k),
         "base_sha": base_sha, "head_sha": (git_out(["rev-parse", "HEAD"], root) or "").strip(),
         "base": base,
+        'preconditions': {'errors': chunk_preconditions.errors(root, d, n),
+                          'receipt_sha256': snapshot_base.digest(chunk_preconditions.receipt_path(d, n).read_bytes())
+                          if chunk_preconditions.receipt_path(d, n).is_file() else None},
         "diff_sha256": sha256(diff), "diff_empty": not diff.strip(), "diffstat": diffstat(diff),
         "tests_cmd": tests_cmd, "tests_exit": rc, "tests_sha256": sha256(output),
         "tests_last_line": last_line[:200], "missing_tool": missing,
@@ -220,7 +234,7 @@ def main() -> int:
         argv = ["verify"] + argv[1:]
     elif argv and argv[0] == "--compare":
         argv = ["compare"] + argv[1:]
-    elif argv and argv[0] not in ("write", "baseline", "snapshot", "compare", "verify", "-h", "--help"):
+    elif argv and argv[0] not in ("write", "baseline", "snapshot", "prepare", "compare", "verify", "-h", "--help"):
         argv = ["write"] + argv
     ap = argparse.ArgumentParser(prog=TOOL, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -231,6 +245,8 @@ def main() -> int:
     b.add_argument("root"); b.add_argument("slug"); b.add_argument("n")
     s = sub.add_parser('snapshot')
     s.add_argument('root'); s.add_argument('slug')
+    p = sub.add_parser('prepare')
+    p.add_argument('root'); p.add_argument('slug'); p.add_argument('n'); p.add_argument('--locator', required=True)
     c = sub.add_parser("compare")
     c.add_argument("root"); c.add_argument("slug"); c.add_argument("n"); c.add_argument("k1"); c.add_argument("k2")
     v = sub.add_parser("verify")
@@ -240,6 +256,14 @@ def main() -> int:
     except SystemExit:
         return 2
     root = Path(a.root).resolve()
+    if a.mode == 'prepare':
+        d = root / ARTIFACTS_DIR / a.slug
+        base, snapshot = snapshot_base.load(root, d)
+        current = regenerate_diff(root, base['id'], canonical=True) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot)
+        receipt = chunk_preconditions.create(root, d, a.n, a.locator, current,
+                                              lambda: baseline_mode(root, a.slug, a.n))
+        print(json.dumps(receipt, ensure_ascii=False))
+        return 0
     if a.mode == 'snapshot':
         print(json.dumps({'kind': 'snapshot', 'id': snapshot_base.create(root, root / ARTIFACTS_DIR / a.slug)}))
         return 0

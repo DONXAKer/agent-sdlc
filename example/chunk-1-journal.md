@@ -1,4 +1,4 @@
-# Журнал chunk'а 1: PAY-412 — идемпотентность создания платежа
+# Журнал chunk'а 1: TASK-001 — идемпотентность создания платежа
 
 > Заполненный пример по [`../templates/chunk-journal.template.md`](../templates/chunk-journal.template.md).
 > Diff и вывод тестов попытки (`chunk-1-attempt-1-diff.patch`, `chunk-1-attempt-1-tests.txt`)
@@ -13,7 +13,7 @@
 - Точки правки по итогам точечной разведки: `PaymentService:create`, `PaymentController:create`,
   `PaymentRetryScheduler:retryFailed`, `PaymentIdempotencyIT` (новый файл)
 - Карта разведки: совпала — символы на месте, сигнатуры те, точка правки свободна
-- **Подтвердил:** А. Грицай · 2026-07-16
+- **Подтвердил:** Участник примера · 2026-07-16
 
 ## Попытки
 

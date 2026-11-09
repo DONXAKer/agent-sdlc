@@ -56,7 +56,7 @@ test at test/tariffs.test.ts:72:3
       zone: 'msk'
     }
   
-      at TestContext.<anonymous> (file:///private/var/folders/sk/k4f53x5j0tl758s05k75mf100000gn/T/sdlc-bench-woDk3F/test/tariffs.test.ts:73:5)
+      at TestContext.<anonymous> (file:///<temporary-project>/test/tariffs.test.ts:73:5)
       at Test.runInAsyncScope (node:async_hooks:226:14)
       at Test.run (node:internal/test_runner/test:1201:25)
       at Test.start (node:internal/test_runner/test:1096:17)
@@ -87,7 +87,7 @@ test at test/tariffs.test.ts:76:3
       zone: 'msk'
     }
   
-      at TestContext.<anonymous> (file:///private/var/folders/sk/k4f53x5j0tl758s05k75mf100000gn/T/sdlc-bench-woDk3F/test/tariffs.test.ts:77:5)
+      at TestContext.<anonymous> (file:///<temporary-project>/test/tariffs.test.ts:77:5)
       at Test.runInAsyncScope (node:async_hooks:226:14)
       at Test.run (node:internal/test_runner/test:1201:25)
       at Suite.processPendingSubtests (node:internal/test_runner/test:831:18)

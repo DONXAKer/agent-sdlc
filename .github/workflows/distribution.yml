@@ -1,0 +1,71 @@
+name: Комплекты SDLC
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/distribution.py sync
+      - run: python implementations/codex/test_package.py
+      - run: python check.py
+      - run: python tools/distribution.py package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdlc-${{ matrix.os }}
+          path: dist/*
+  update:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/distribution.py sync
+      - run: python implementations/codex/test_package.py
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/sdlc-resources
+          title: 'Обновить установочные ресурсы SDLC'
+          commit-message: 'Обновить установочные ресурсы SDLC'
+          body: 'Синхронизация канонических ресурсов и контрольных сумм. Тексты навыков не изменяются.'
+          add-paths: |
+            implementations/claude-code/skills/**/templates/**
+            implementations/claude-code/skills/sdlc-verify/tools/**
+            implementations/codex/skills/**/templates/**
+            implementations/codex/skills/sdlc-verify/tools/**
+            implementations/codex/skills/sdlc-run/references/SDLC.md
+            implementations/codex/manifest.json
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python tools/distribution.py sync
+      - run: git diff --exit-code
+      - name: Проверить версию
+        run: python -c "import json,os; assert 'v'+json.load(open('implementations/codex/manifest.json'))['version']==os.environ['GITHUB_REF_NAME']"
+      - run: python tools/distribution.py package
+      - name: Опубликовать релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --notes "Комплекты Agent-SDLC для Codex и Claude Code."

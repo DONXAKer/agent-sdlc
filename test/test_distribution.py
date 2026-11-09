@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,6 +151,18 @@ class DistributionTests(unittest.TestCase):
                                     capture_output=True, encoding='utf-8', errors='strict')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertNotIn('UnicodeEncodeError', result.stderr)
+
+    def test_symlink_above_root_is_not_a_bundle_resource(self):
+        # macOS размещает временные каталоги под системной ссылкой /var.
+        ancestor = self.root.parent.parent
+        original = Path.is_symlink
+        def is_symlink(path):
+            return path == ancestor or original(path)
+        with patch.object(Path, 'is_symlink', is_symlink):
+            self.assertTrue(distribution.sync(self.root, check=True))
+            (self.root / 'SDLC.md').write_text('Изменён канон', encoding='utf-8')
+            distribution.sync(self.root)
+            distribution.package(self.root, revision='test-revision')
 
     def test_package_rejects_stale_resources(self):
         (self.root / 'SDLC.md').write_text('Изменено', encoding='utf-8')

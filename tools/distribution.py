@@ -44,12 +44,13 @@ def inventory(root):
 
 
 def selected_files(root, paths, overrides=None):
+    root = root.resolve()
     result = {}
     overrides = overrides or {}
     for name in paths:
         path = Path(name)
         target = root / path
-        if not target.resolve().is_relative_to(root.resolve()) or any(p.is_symlink() for p in (target, *target.parents)):
+        if not target.resolve().is_relative_to(root.resolve()) or any(p.is_symlink() for p in (target, *target.parents) if p.is_relative_to(root)):
             raise ValueError(f'Символьная ссылка в комплекте: {path}')
         result[path] = overrides[path] if path in overrides else canonical_bytes(target)
     return result
@@ -84,6 +85,7 @@ def generated(root):
 
 
 def sync(root=ROOT, check=False):
+    root = root.resolve()
     desired = generated(root)
     owned = set()
     if (root / RESOURCE_RECORD).exists():
@@ -114,7 +116,7 @@ def sync(root=ROOT, check=False):
     # Проверь цели до записи и удаления. Не переходи через символьные ссылки.
     for path in changes + removed:
         target = root / path
-        if not target.resolve().is_relative_to(root.resolve()) or any(p.is_symlink() for p in (target, *target.parents)):
+        if not target.resolve().is_relative_to(root.resolve()) or any(p.is_symlink() for p in (target, *target.parents) if p.is_relative_to(root)):
             raise ValueError(f'Недопустимая цель: {target}')
     for path in changes:
         target = root / path
@@ -127,6 +129,7 @@ def sync(root=ROOT, check=False):
 
 
 def package(root=ROOT, revision=None):
+    root = root.resolve()
     if not sync(root, check=True):
         raise ValueError('Установочные ресурсы устарели. Выполни команду sync.')
     if revision is None:

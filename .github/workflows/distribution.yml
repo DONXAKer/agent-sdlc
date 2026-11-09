@@ -20,6 +20,8 @@ jobs:
           python-version: '3.11'
       - run: python tools/distribution.py sync
       - run: python implementations/codex/test_package.py
+      - name: Проверить актуальность ресурсов
+        run: python tools/distribution.py check
       - run: python check.py
       - run: python tools/distribution.py package
       - uses: actions/upload-artifact@v4
@@ -27,6 +29,9 @@ jobs:
           name: sdlc-${{ matrix.os }}
           path: dist/*
   update:
+    concurrency:
+      group: sdlc-resource-update
+      cancel-in-progress: false
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -52,6 +57,7 @@ jobs:
             implementations/codex/skills/sdlc-verify/tools/**
             implementations/codex/skills/sdlc-run/references/SDLC.md
             implementations/codex/manifest.json
+            implementations/codex/generated-resources.json
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -60,8 +66,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: python tools/distribution.py sync
-      - run: git diff --exit-code
+      - run: python tools/distribution.py check
       - name: Проверить версию
         run: python -c "import json,os; assert 'v'+json.load(open('implementations/codex/manifest.json'))['version']==os.environ['GITHUB_REF_NAME']"
       - run: python tools/distribution.py package

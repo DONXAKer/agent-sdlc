@@ -29,7 +29,7 @@ BASH = shutil.which("bash")
 
 TEST_FILES = sorted((ROOT / "test").glob("test_*.py"))  # discovery: новый test_*.py попадает сюда сам
 STEPS = [
-    ("шаблоны: копии в скиллах = корень", ["bash", "./sync-templates.sh", "--check"], ROOT),
+    ("шаблоны: копии в скиллах = корень", [PY, "tools/distribution.py", "check"], ROOT),
     ("согласованность SDLC.md ↔ шаблоны ↔ скиллы ↔ агенты ↔ константы",
      [PY, "tools/check-consistency.py"], ROOT),
     ("регрессионный корпус flow-verdict.py", [PY, "test/run-corpus.py"], ROOT),

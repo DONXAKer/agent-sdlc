@@ -2,7 +2,10 @@
 """Установи комплект Agent-SDLC в .cursor целевого проекта."""
 
 import argparse
+import hashlib
+import json
 import shutil
+import stat
 import tempfile
 import sys
 from pathlib import Path
@@ -14,6 +17,26 @@ for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding='utf-8', errors='replace')
 
 
+def plain_path(base, name):
+    """Отклони ссылки, reparse point и выход за корень до доступа к файлу."""
+    relative = Path(name)
+    if relative.is_absolute() or '..' in relative.parts or not relative.parts:
+        raise ValueError(f'Недопустимый относительный путь: {name}')
+    target = base / relative
+    for part in (target, *target.parents):
+        if not part.is_relative_to(base):
+            break
+        try:
+            metadata = part.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0):
+            raise ValueError(f'Ссылка или reparse point в пути: {part}')
+    if not target.resolve().is_relative_to(base):
+        raise ValueError(f'Путь выходит за корень: {target}')
+    return target
+
+
 def install(project, check=False):
     project = Path(project).resolve()
     if not project.is_dir():
@@ -21,22 +44,25 @@ def install(project, check=False):
     destination = project / '.cursor'
     if not (SOURCE / 'skills/sdlc-run/SKILL.md').is_file():
         raise ValueError('Ресурсы Cursor отсутствуют. Выполни python tools/distribution.py sync')
+    manifest = json.loads(plain_path(SOURCE, 'manifest.json').read_text(encoding='utf-8'))
     changes = []
-    for folder in ('skills', 'agents', 'rules'):
-        for source in sorted((SOURCE / folder).rglob('*')):
-            if not source.is_file() or '__pycache__' in source.parts or source.suffix == '.pyc':
-                continue
-            target = destination / source.relative_to(SOURCE)
-            if any(p.is_symlink() for p in (target, *target.parents) if p.is_relative_to(project)):
-                raise ValueError(f'Символьная ссылка в цели установки: {target}')
-            if target.exists() and not target.is_file():
-                raise ValueError(f'Вместо файла найден каталог: {target}')
-            if not target.exists() or target.read_bytes() != source.read_bytes():
-                changes.append((source, target))
+    for name, digest in manifest['files'].items():
+        relative = Path(name)
+        if len(relative.parts) < 2 or relative.parts[0] not in ('skills', 'agents', 'rules'):
+            raise ValueError(f'Недопустимый ресурс комплекта: {name}')
+        source = plain_path(SOURCE, name)
+        if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+            raise ValueError(f'Повреждён комплект: {name}')
+        target = plain_path(project, Path('.cursor') / relative)
+        if target.exists() and not target.is_file():
+            raise ValueError(f'Вместо файла найден каталог: {target}')
+        if not target.exists() or target.read_bytes() != source.read_bytes():
+            changes.append((source, target))
     if check:
         return not changes
     backup = None
     for source, target in changes:
+        plain_path(project, target.relative_to(project))
         if target.exists():
             if backup is None:
                 backup = Path(tempfile.mkdtemp(prefix='sdlc-backup-', dir=destination))

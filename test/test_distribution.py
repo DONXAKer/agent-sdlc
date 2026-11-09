@@ -1,5 +1,6 @@
 """Регрессии синхронизации и упаковки без изменения исходного checkout."""
 import importlib.util
+import fnmatch
 import json
 import os
 import shutil
@@ -18,6 +19,19 @@ spec.loader.exec_module(distribution)
 
 
 class DistributionTests(unittest.TestCase):
+    def test_automation_includes_generated_cursor_changes(self):
+        before = self.snapshot()
+        source = self.root / 'SDLC.md'
+        source.write_bytes(source.read_bytes() + b'\n')
+        distribution.sync(self.root)
+        changes = [path.as_posix() for path, data in self.snapshot().items()
+                   if before.get(path) != data and path.is_relative_to(distribution.CURSOR)]
+        workflow = (ROOT / '.github/workflows/distribution.yml').read_text(encoding='utf-8')
+        patterns = [line.strip() for line in workflow.split('add-paths: |', 1)[1].split('  release:', 1)[0].splitlines()]
+        self.assertTrue(changes)
+        for name in changes:
+            self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns), name)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='sdlc-distribution-')
         self.addCleanup(self.temp.cleanup)

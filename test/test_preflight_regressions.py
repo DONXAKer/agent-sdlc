@@ -76,7 +76,7 @@ class PreflightRegressions(unittest.TestCase):
         directory = self.root / 'tools with spaces'
         directory.mkdir()
         executable = directory / ('python.exe' if sys.platform == 'win32' else 'python')
-        executable.write_bytes(Path(sys.executable).read_bytes())
+        shutil.copy2(sys.executable, executable)
         if sys.platform == 'win32':
             for library in Path(sys.executable).parent.glob('*.dll'):
                 shutil.copy2(library, directory / library.name)
@@ -105,6 +105,59 @@ class PreflightRegressions(unittest.TestCase):
         code, result = self.run_cli()
         self.assertEqual(code, 1)
         self.assertTrue(result['configuration_error'])
+
+    def test_posix_comment_quotes_do_not_block_valid_command(self):
+        command = f'"{Path(sys.executable).as_posix()}" -c "pass" # "'
+        if sys.platform == 'win32' and not common.git_bash():
+            self.skipTest('Для проверки нужен POSIX shell')
+        self.assertEqual(common.run_shell(command, self.root)[0], 0)
+        self.write(f'`{command}`')
+        self.assertEqual(self.run_cli()[0], 0)
+        self.assertEqual(common.command_tokens('python file#name.py', posix=True), ['python', 'file#name.py'])
+        self.assertEqual(common.command_tokens('python "#name.py" # "', posix=True), ['python', '#name.py'])
+
+    def test_unknown_gate_state_blocks_preflight(self):
+        self.write(f'`"{Path(sys.executable).as_posix()}" -c "pass"`')
+        path = self.root / '.sdlc/gates.md'
+        valid = path.read_text(encoding='utf-8')
+        for value in ('настройка', 'позже', '', '‹да/нет›'):
+            path.write_text(valid + f'\n| Секреты в diff | {value} | этап 6 | описание |', encoding='utf-8')
+            code, result = self.run_cli()
+            self.assertEqual(code, 1, value)
+            self.assertTrue(result['configuration_error'], value)
+        for value in ('да', 'нет'):
+            debt = ('\n\n## Долг\n\n| Гейт | Где должен стоять | Как закрывается | Дата | Кто |\n'
+                    '|---|---|---|---|---|\n'
+                    '| Секреты в diff | этап 6 | риск принят: тестовая фикстура | 2026-11-09 | Тестовый оператор |')
+            path.write_text(valid + f'\n| Секреты в diff | {value} | этап 6 | `git --version` |' + debt, encoding='utf-8')
+            self.assertEqual(self.run_cli()[0], 0, value)
+        path.write_text(valid + '\n| Секреты в diff | нет | этап 6 | н/п — долг |', encoding='utf-8')
+        self.assertEqual(self.run_cli()[0], 1)
+
+    def test_escaped_pipe_in_closed_debt_is_not_a_column(self):
+        self.write(f'`"{Path(sys.executable).as_posix()}" -c "pass"`')
+        path = self.root / '.sdlc/gates.md'
+        valid = path.read_text(encoding='utf-8')
+        for reason in ('A и B', r'A \| B'):
+            path.write_text(valid + '\n| Секреты в diff | нет | этап 6 | н/п — долг |\n\n'
+                            '## Долг\n\n| Гейт | Где должен стоять | Как закрывается | Дата | Кто |\n'
+                            '|---|---|---|---|---|\n'
+                            f'| Секреты в diff | этап 6 | риск принят: {reason}; вернуться после пилота | 2026-11-09 | Оператор |',
+                            encoding='utf-8')
+            self.assertEqual(self.run_cli()[0], 0, reason)
+
+    def test_unknown_state_turns_green_flow_verdict_red(self):
+        source = ROOT / 'test/flow-verdict-corpus/green/.sdlc'
+        shutil.copytree(source, self.root / '.sdlc', dirs_exist_ok=True)
+        args = [sys.executable, str(TOOLS / 'flow-verdict.py'), '--at', 'verify', str(self.root), 'green']
+        before = subprocess.run(args, capture_output=True, encoding='utf-8')
+        self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+        gates = self.root / '.sdlc/gates.md'
+        gates.write_text(gates.read_text(encoding='utf-8').replace(
+            '\n\n## Долг', '\n| Секреты в diff | настройка | этап 6 | описание |\n\n## Долг', 1), encoding='utf-8')
+        after = subprocess.run(args, capture_output=True, encoding='utf-8')
+        self.assertEqual(after.returncode, 1, after.stdout + after.stderr)
+        self.assertIn('Неизвестное значение', after.stdout)
 
 
 if __name__ == '__main__':

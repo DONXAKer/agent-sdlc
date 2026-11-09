@@ -14,6 +14,9 @@ python implementations/cursor/install-cursor.py /путь/к/проекту --ch
 Установщик создаёт `.cursor/skills`, `.cursor/agents` и `.cursor/rules`.
 Перед заменой отличающихся файлов он сохраняет резервную копию в `.cursor/sdlc-backup-*`.
 Он сохраняет посторонние файлы. Режим `--check` проверяет комплект без записи.
+Установщик читает только файлы из `manifest.json` и проверяет их SHA-256.
+Локальные `.env` и другие незаявленные файлы исходного каталога не устанавливаются.
+Ссылки и Windows reparse point в путях источника и назначения блокируют установку.
 Запусти новый чат Cursor и вызови `/sdlc-run <slug>` с явным корнем проекта.
 
 Навыки: `sdlc-run`, `sdlc-intent`, `sdlc-explore`, `sdlc-ask`, `sdlc-plan`,

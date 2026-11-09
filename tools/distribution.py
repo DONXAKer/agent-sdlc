@@ -113,6 +113,12 @@ def sync(root=ROOT, check=False):
     manifest['files'] = {p.relative_to(CODEX).as_posix(): hashlib.sha256(data).hexdigest()
                          for p, data in sorted(codex_files.items()) if p != manifest_path}
     desired[manifest_path] = encoded(manifest)
+    cursor_files = {p.relative_to(CURSOR).as_posix(): data for p, data in desired.items() if p.is_relative_to(CURSOR)}
+    for name in ('agents/sdlc-claims.md', 'agents/sdlc-locator.md', 'agents/sdlc-reviewer.md',
+                 'agents/sdlc-methodologist.md', 'rules/agent-sdlc.mdc'):
+        cursor_files[name] = canonical_bytes(root / CURSOR / name)
+    desired[CURSOR / 'manifest.json'] = encoded({'version': manifest['version'], 'files': {
+        name: hashlib.sha256(data).hexdigest() for name, data in sorted(cursor_files.items())}})
     changes = [p for p, data in desired.items() if not (root / p).is_file() or (root / p).read_bytes() != data]
     removed = [p for p in stale if (root / p).exists()]
     if check:

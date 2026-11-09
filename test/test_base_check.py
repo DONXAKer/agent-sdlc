@@ -24,6 +24,14 @@ def tests_file(*bodies):
 
 
 class BaseCheckTests(unittest.TestCase):
+    def test_bad_quotes_return_gate_result_without_traceback(self):
+        (self.root / 'app.py').write_text('def add(a, b):\n    return a + b\n', encoding='utf-8')
+        self.snapshot()
+        code, result, _, output = self.run_tool('--tests-cmd', 'python -c "')
+        self.assertNotEqual(code, 0, output)
+        self.assertIsNone(result.get('missing_tool'))
+        self.assertIn(result['status'], ('fail', 'skip'))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

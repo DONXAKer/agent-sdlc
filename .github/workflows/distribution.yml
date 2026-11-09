@@ -58,6 +58,8 @@ jobs:
             implementations/codex/skills/sdlc-run/references/SDLC.md
             implementations/codex/manifest.json
             implementations/codex/generated-resources.json
+            implementations/cursor/skills/**
+            implementations/cursor/manifest.json
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build

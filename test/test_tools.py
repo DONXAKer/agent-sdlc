@@ -43,6 +43,12 @@ GATES = """# Набор гейтов: тест
 | Ревью независимым агентом | да — минимум | этап 6 | агент sdlc-reviewer |
 | Секреты в diff | нет | этап 6 | `definitely-missing-tool-xyz scan` |
 | Проверка предусловий публикации | да | этап 7 | `definitely-missing-tool-xyz publish` |
+
+## Долг
+
+| Гейт | Где должен стоять | Как закрывается | Дата | Кто |
+|---|---|---|---|---|
+| Секреты в diff | этап 6 | риск принят: тестовая фикстура | 2026-11-09 | Тестовый оператор |
 """
 
 
@@ -127,6 +133,16 @@ class PreflightTests(unittest.TestCase):
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_bad_quotes_preserve_failed_test_evidence(self):
+        (self.root / 'app.py').write_text("print('v2')\n", encoding='utf-8')
+        proc = self.run_tool('write', str(self.root), 'T-1', '1', '1', '--tests-cmd', 'python -c "')
+        self.assertNotIn('Traceback', proc.stderr)
+        record = self.evidence()
+        self.assertNotEqual(record['tests_exit'], 0)
+        self.assertIsNone(record['missing_tool'])
+        for suffix in ('diff.patch', 'tests.txt', 'evidence.json'):
+            self.assertTrue((self.d / f'chunk-1-attempt-1-{suffix}').is_file())
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

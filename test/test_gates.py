@@ -126,6 +126,54 @@ class ScopeTests(Base):
 
 
 class AntiBypassTests(Base):
+    def test_declared_luau_qa_paths(self):
+        path = 'tools/studio/probe_check.luau'
+        extra = ('--test-path', 'tools/studio/*.luau')
+        p = self.write_patch({path: (['assert(true)'], None)})
+        self.assertEqual(run('anti_bypass.py', p, *extra)[0], 1)
+        p = self.write_patch({'tests/test_probe.py': (['assert True'], None)})
+        self.assertEqual(run('anti_bypass.py', p, *extra)[0], 1)
+        p = self.write_patch({path: (['assert(true)'], ['assert(true)', 'assert(1 == 1)'])})
+        self.assertEqual(run('anti_bypass.py', p, *extra)[0], 0)
+        p = self.write_patch({path: (['assert(true)'], ['print("removed")'])})
+        self.assertEqual(run('anti_bypass.py', p, *extra)[0], 1)
+        for replacement in ('print("assert(true)")', "print('assert(true)')", 'print([[assert(true)]])',
+                            'print([=[assert(true)]=])', 'print(`assert(true)`)', '-- assert(true)'):
+            p = self.write_patch({path: (['assert(true)'], [replacement])})
+            self.assertEqual(run('anti_bypass.py', p, *extra)[0], 1, replacement)
+        p = self.write_patch({path: (['assert(true)'], ['print([=[', 'assert(true)', ']=])'])})
+        self.assertEqual(run('anti_bypass.py', p, *extra)[0], 1)
+        p.write_text(f'''diff --git a/{path} b/{path}
+--- a/{path}
++++ b/{path}
+@@ -1,4 +1,4 @@
+ local message = [[
+-text
++assert(true)
+ ]]
+-assert(true)
++print("no checks")
+''', encoding='utf-8')
+        self.assertEqual(run('anti_bypass.py', p, *extra)[0], 1)
+        p.write_text(f'''diff --git a/{path} b/{path}
+--- a/{path}
++++ b/{path}
+@@ -30,1 +30,2 @@
+ assert(true)
++assert(1 == 1)
+''', encoding='utf-8')
+        self.assertEqual(run('anti_bypass.py', p, *extra)[1]['status'], 'skip')
+        p.write_text(f'''diff --git a/{path} b/{path}
+--- a/{path}
++++ b/{path}
+@@ -30,1 +30,1 @@
+-assert(true)
++plain text
+''', encoding='utf-8')
+        self.assertEqual(run('anti_bypass.py', p, *extra)[1]['status'], 'skip')
+        p = self.write_patch({path: (['customCheck()'], ['customCheck(1)'])})
+        self.assertEqual(run('anti_bypass.py', p, *extra)[1]['status'], 'skip')
+
     def test_clean_patch_passes(self):
         p = self.write_patch({"tests/test_app.py": (["def test_a():", "    assert 1"],
                                                     ["def test_a():", "    assert 1", "def test_b():", "    assert 2"])})

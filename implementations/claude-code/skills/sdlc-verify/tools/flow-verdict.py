@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sdlc_common import (  # noqa: E402  — константы и разбор: один источник на все инструменты
     ACTIONS, AXES, CHUNK_FILES, CHUNK_LINES, CONSTANTS, DEFAULT_BUDGET as _DEFAULT_BUDGET,
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
+    gate_configuration_errors,
 )
 
 DEFAULT_BUDGET = str(_DEFAULT_BUDGET)  # норма SDLC.md → этап 6; шаблон журнала сверяет tools/check-consistency.py
@@ -410,6 +411,8 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     texts = {p.name: read(p) for p in natsorted(d.glob("*.md"))}
     gates = read(sdlc / "gates.md")
     texts["gates.md"] = gates
+    for name, detail in gate_configuration_errors(gates):
+        v.check(False, f"конфигурация гейта {name}", detail, "заполни состояние переключателя явно")
     intent = texts.get("intent.md")
     readiness = texts.get("readiness.md")
     plan = texts.get("plan.md")

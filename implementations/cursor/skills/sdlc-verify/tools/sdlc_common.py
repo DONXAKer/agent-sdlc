@@ -98,6 +98,43 @@ def enabled(on_cell: str) -> bool:
     return bool(re.match(r"да(?!\w)", on_cell.strip()))
 
 
+def gate_configuration_errors(text: str):
+    """Проверь переключатели только в таблице набора, без таблиц долга и журнала."""
+    table, active = [], False
+    for line in (text or '').splitlines():
+        if re.match(r'^\|\s*Гейт\s*\|\s*Вкл\s*\|', line):
+            active = True
+        elif active and not line.startswith('|'):
+            active = False
+        if active:
+            table.append(line)
+    debt = {}
+    debt_active = False
+    for line in (text or '').splitlines():
+        if re.match(r'^\|\s*Гейт\s*\|\s*Где должен стоять\s*\|', line):
+            debt_active = True
+            continue
+        if debt_active and not line.startswith('|'):
+            debt_active = False
+        if debt_active:
+            cells = [cell.strip().replace(r'\|', '|') for cell in re.split(r'(?<!\\)\|', line.strip().strip('|'))]
+            if len(cells) == 5:
+                debt[cells[0]] = cells[1:]
+    errors = []
+    for name, on, _, _ in gate_rows('\n'.join(table)):
+        if not re.match(r'^(?:да|нет)(?!\w)', on) or re.search(r'\b(?:да\s*/\s*нет|нет\s*/\s*да)\b', on):
+            errors.append((name, f'Неизвестное значение «Вкл»: {on!r}; укажи «да» или «нет»'))
+        elif name in MANDATORY_GATES and not enabled(on):
+            errors.append((name, 'Обязательный гейт нельзя выключить'))
+        elif not enabled(on):
+            record = debt.get(name)
+            if (not record or any(not cell or '‹' in cell or cell == NA for cell in record)
+                    or not re.match(r'^(?:проверяет руками|риск принят):\s*\S', record[1])
+                    or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', record[2])):
+                errors.append((name, 'Выключенный гейт требует закрытия долга: способ, дата и ответственный'))
+    return errors
+
+
 def enabled_gates(gates_text: str, stage=None):
     """[(имя, этап, чем)] включённых строк; stage — фильтр по колонке «Где отчитывается»."""
     return [(n, st, how) for n, on, st, how in gate_rows(gates_text)
@@ -209,7 +246,30 @@ def command_tokens(cmd: str, posix=None) -> list:
     if posix is None:
         posix = not sys.platform.startswith("win") or bool(git_bash())
     if posix:
-        parts = shlex.split(cmd or "", posix=True)
+        # В POSIX # начинает комментарий только в начале слова, вне кавычек.
+        clean, quote, escaped, comment, boundary = [], '', False, False, True
+        for char in cmd or '':
+            if comment:
+                if char != '\n':
+                    continue
+                comment = False
+            if escaped:
+                clean.append(char)
+                escaped, boundary = False, False
+                continue
+            if char == '\\' and quote != "'":
+                escaped = True
+            elif quote:
+                if char == quote:
+                    quote = ''
+            elif char in ("'", '"'):
+                quote = char
+            elif char == '#' and boundary:
+                comment = True
+                continue
+            clean.append(char)
+            boundary = not quote and (char.isspace() or char in ';|&()')
+        parts = shlex.split(''.join(clean), posix=True)
     else:
         # cmd.exe: обратная косая черта остаётся частью пути, ^ экранирует вне кавычек.
         parts, word, quoted, started = [], [], False, False
@@ -281,7 +341,11 @@ def missing_tool(output: str, cmd: str, rc: int = 0):
     (не любое «No such file» из лога тестов). Возвращает строку-улику или None."""
     if rc in (127, 9009):
         return next((ln for ln in output.splitlines() if ln.strip()), f"код возврата {rc}")
-    tok = first_token(cmd)
+    try:
+        tok = first_token(cmd)
+    except ValueError:
+        # Синтаксическая ошибка оболочки не означает отсутствие инструмента.
+        return None
     base = tok.replace("\\", "/").split("/")[-1]
     for ln in output.splitlines():
         if MISSING_TOOL_RE.search(ln) and (tok in ln or (base and base in ln)):

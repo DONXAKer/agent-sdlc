@@ -4,3 +4,6 @@
 __pycache__/
 /.idea/
 /dist/
+
+# Архивы распространяются через dist/ и GitHub Releases.
+/implementations/agent-sdlc-codex.zip

@@ -14,8 +14,8 @@ SDLC.md → «Набор гейтов проекта»: «Runner-реализа�
 Ничего не запускает.
 
   python gates-preflight.py <корень проекта> [--stage "этап 6"] [--json]
-Код возврата: 0 — всё исполнимо (или команд нет); 1 — есть неисполнимые — кандидат в
-`blocked_env`, строка долга печатается готовой; 2 — набора нет.
+Код возврата: 0 — исполнители доступны; 1 — отсутствует инструмент или ошибочна конфигурация;
+2 — набора нет. Встроенное ревью регистрирует вызывающая среда флагом --builtin-review.
 """
 
 import argparse
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sdlc_common import ARTIFACTS_DIR, command_of, enabled_gates, first_token, read  # noqa: E402
+from sdlc_common import ARTIFACTS_DIR, command_of, command_tokens, enabled_gates, read  # noqa: E402
 
 INTERPRETERS = {"python", "python3", "py", "node", "bash", "sh"}
 BUILTINS = {"true", "false", "echo", "cd", "export", "set", "test"}
@@ -48,13 +48,12 @@ def executable(token: str, root: Path) -> bool:
     return shutil.which(token) is not None
 
 
-def script_of(cmd: str, tok: str):
+def script_of(parts: list):
     """Для интерпретатора — путь скрипта (первый аргумент не с `-`), иначе None."""
+    tok = parts[0] if parts else ""
     if tok.replace("\\", "/").split("/")[-1].split(".")[0] not in INTERPRETERS:
         return None
-    parts = cmd.split()
-    idx = parts.index(tok) if tok in parts else 0
-    for p in parts[idx + 1:]:
+    for p in parts[1:]:
         if p.startswith("-"):
             if p in ("-m", "-c"):
                 return None  # модуль/строка кода — файла нет
@@ -63,7 +62,7 @@ def script_of(cmd: str, tok: str):
     return None
 
 
-def preflight(root: Path, stage: str = "этап 6"):
+def preflight(root: Path, stage: str = "этап 6", builtin_review=False):
     gates = root / ARTIFACTS_DIR / "gates.md"
     if not gates.exists():
         return None
@@ -71,14 +70,23 @@ def preflight(root: Path, stage: str = "этап 6"):
     for name, _, how in enabled_gates(read(gates, ""), stage):
         cmd = command_of(how)
         if cmd is None:
+            if name == "Ревью независимым агентом" and builtin_review:
+                rows.append({"gate": name, "command": None, "status": "ok",
+                             "detail": "Зарегистрирован встроенный исполнитель независимого ревью"})
+                continue
             rows.append({"gate": name, "command": None, "status": "no-command",
                          "detail": "команды в обратных кавычках нет — при прогоне даст ⏭ «исполнить нечем», "
                                    "если нет встроенной реализации"})
             continue
-        tok = first_token(cmd)
+        try:
+            parts = command_tokens(cmd)
+        except ValueError as error:
+            rows.append({"gate": name, "command": cmd, "status": "invalid-command", "detail": str(error)})
+            continue
+        tok = parts[0] if parts else ""
         ok = executable(tok, root)
         detail = "" if ok else f"«{tok}» не найден: ни в PATH, ни как путь от корня проекта"
-        script = script_of(cmd, tok) if ok else None
+        script = script_of(parts) if ok else None
         if script and not path_exists(script, root):
             ok, detail = False, f"скрипт «{script}» не найден: ни от корня проекта, ни по абсолютному пути, ни через ~"
         rows.append({"gate": name, "command": cmd, "token": tok, "status": "ok" if ok else "missing",
@@ -90,22 +98,26 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="gates-preflight.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("root"); ap.add_argument("--stage", default="этап 6"); ap.add_argument("--json", action="store_true")
+    ap.add_argument("--builtin-review", action="store_true",
+                    help="Вызывающая среда зарегистрировала доступного независимого агента ревью")
     try:
         a = ap.parse_args()
     except SystemExit:
         return 2
     root = Path(a.root).resolve()
-    rows = preflight(root, a.stage)
+    rows = preflight(root, a.stage, a.builtin_review)
     if rows is None:
         print(f"нет {root / ARTIFACTS_DIR / 'gates.md'} — набор не собран, виток не стартует")
         return 2
     missing = [r for r in rows if r["status"] == "missing"]
+    invalid = [r for r in rows if r["status"] in ("no-command", "invalid-command")]
     if a.json:
-        print(json.dumps({"stage": a.stage, "rows": rows, "blocked_env": bool(missing)}, ensure_ascii=False, indent=2))
-        return 1 if missing else 0
+        print(json.dumps({"stage": a.stage, "rows": rows, "blocked_env": bool(missing),
+                          "configuration_error": bool(invalid)}, ensure_ascii=False, indent=2))
+        return 1 if missing or invalid else 0
     print(f"# Preflight набора гейтов ({a.stage}): {root}\n")
     for r in rows:
-        glyph = {"ok": "✅", "missing": "❌", "no-command": "⚠"}[r["status"]]
+        glyph = {"ok": "✅", "missing": "❌", "no-command": "⚠", "invalid-command": "❌"}[r["status"]]
         print(f"- {glyph} {r['gate']}: `{r['command']}`" if r["command"] else f"- {glyph} {r['gate']}: {r['detail']}")
         if r["status"] == "missing":
             print(f"    {r['detail']}")
@@ -115,6 +127,9 @@ def main() -> int:
         for r in missing:
             print(f"| {r['gate']}: нет «{r['token']}» в среде исполнения | этап 6 | "
                   f"‹кто и чем закрывает: ставит инструмент / собирает образ› | ‹дата› | ‹имя› |")
+        return 1
+    if invalid:
+        print("\nОшибка конфигурации: укажи допустимую команду или зарегистрируй встроенное ревью.")
         return 1
     print("\nВсе команды включённых гейтов исполнимы в этой среде.")
     return 0

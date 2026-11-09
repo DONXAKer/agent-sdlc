@@ -164,6 +164,65 @@ class DistributionTests(unittest.TestCase):
             distribution.sync(self.root)
             distribution.package(self.root, revision='test-revision')
 
+    def install(self, base, dest):
+        return subprocess.run([sys.executable, str(base / 'install-codex.py'), '--project', str(dest)],
+                              capture_output=True, encoding='utf-8')
+
+    def directory_link(self, link, target):
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError:
+            if os.name != 'nt':
+                raise
+            result = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(target)], capture_output=True)
+            if result.returncode:
+                self.skipTest('Среда не разрешает ссылки каталогов')
+
+    def test_install_uses_manifest_not_directory_contents(self):
+        base = self.root / distribution.CODEX
+        extra = base / 'skills/sdlc-run/local.py'
+        extra.write_bytes(b'UNLISTED_FILE')
+        (base / 'skills/sdlc-run/.env').write_bytes(b'UNLISTED_SECRET')
+        dest = Path(self.temp.name) / 'target'
+        result = self.install(base, dest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(list((dest / '.codex/agents').glob('sdlc-*.toml'))), 4)
+        self.assertEqual(self.install(base, dest).returncode, 0)
+        self.assertFalse((dest / '.agents/skills/sdlc-run/local.py').exists())
+        self.assertFalse((dest / '.agents/skills/sdlc-run/.env').exists())
+        record = json.loads((dest / '.codex/sdlc-installation.json').read_text(encoding='utf-8'))
+        self.assertFalse(any('local.py' in name or '.env' in name for name in record['files']))
+
+    def test_install_rejects_linked_source_directory(self):
+        base = self.root / distribution.CODEX
+        skill = base / 'skills/sdlc-run'
+        real = base / 'original-skill'
+        skill.rename(real)
+        self.directory_link(skill, real)
+        result = self.install(base, Path(self.temp.name) / 'target')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Символьная ссылка', result.stderr)
+
+    def test_stale_parent_link_is_rejected_before_any_write(self):
+        base = self.root / distribution.CODEX
+        dest = Path(self.temp.name) / 'target'
+        victim = dest / 'src/tools/old.py'
+        victim.parent.mkdir(parents=True)
+        victim.write_bytes(b'KEEP_SOURCE')
+        skills = dest / '.agents/skills'
+        skills.mkdir(parents=True)
+        self.directory_link(skills / 'sdlc-old', dest / 'src')
+        record = dest / '.codex/sdlc-installation.json'
+        record.parent.mkdir()
+        record.write_text(json.dumps({'files': ['.agents/skills/sdlc-old/tools/old.py']}), encoding='utf-8')
+        before = record.read_bytes()
+        result = self.install(base, dest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Символьная ссылка', result.stderr)
+        self.assertEqual(victim.read_bytes(), b'KEEP_SOURCE')
+        self.assertEqual(record.read_bytes(), before)
+        self.assertFalse((skills / 'sdlc-run').exists())
+
     def test_package_rejects_stale_resources(self):
         (self.root / 'SDLC.md').write_text('Изменено', encoding='utf-8')
         with self.assertRaises(ValueError):

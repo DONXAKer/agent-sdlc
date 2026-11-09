@@ -38,8 +38,8 @@ GATES = """# Набор гейтов: тест
 |---|---|---|---|
 | Сборка | да — минимум | этап 6 | `git --version` |
 | Тесты | да — минимум | этап 6 | `{tests}` |
-| Scope: файлы вне плана | да — минимум | этап 6 | встроенная реализация |
-| Анти-обход тест-гейта | да — минимум | этап 6 | встроенная реализация |
+| Scope: файлы вне плана | да — минимум | этап 6 | `git diff --stat` |
+| Анти-обход тест-гейта | да — минимум | этап 6 | `git diff --check` |
 | Ревью независимым агентом | да — минимум | этап 6 | агент sdlc-reviewer |
 | Секреты в diff | нет | этап 6 | `definitely-missing-tool-xyz scan` |
 | Проверка предусловий публикации | да | этап 7 | `definitely-missing-tool-xyz publish` |
@@ -113,12 +113,12 @@ class PreflightTests(unittest.TestCase):
 
     def test_cli_exit_codes(self):
         self.write_gates("definitely-missing-tool-xyz test")
-        proc = subprocess.run([sys.executable, str(PREFLIGHT), str(self.root)],
+        proc = subprocess.run([sys.executable, str(PREFLIGHT), str(self.root), "--builtin-review"],
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(proc.returncode, 1)
         self.assertIn("blocked_env", proc.stdout)
         self.write_gates("git status")
-        proc = subprocess.run([sys.executable, str(PREFLIGHT), str(self.root)],
+        proc = subprocess.run([sys.executable, str(PREFLIGHT), str(self.root), "--builtin-review"],
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(proc.returncode, 0)
         proc = subprocess.run([sys.executable, str(PREFLIGHT), str(self.root), "--stage"],

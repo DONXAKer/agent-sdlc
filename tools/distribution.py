@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLAUDE = Path('implementations/claude-code')
 CODEX = Path('implementations/codex')
+CURSOR = Path('implementations/cursor')
 TEMPLATES = {
     'intent': ('intent',), 'gates': ('intent',),
     'readiness': ('intent', 'plan'), 'exploration-report': ('explore',),
@@ -81,6 +82,11 @@ def generated(root):
         path = Path('templates') / (name + '.template.md')
         desired[CODEX / 'skills/sdlc-verify/templates' / path.name] = canonical_bytes(root / path)
     desired[CODEX / 'skills/sdlc-run/references/SDLC.md'] = canonical_bytes(root / 'SDLC.md')
+    # Cursor использует те же ресурсы. Меняются только обращения к среде и вызовы навыков.
+    for path, data in selected_files(root, [name for name in inventory(root)['codex'] if Path(name).is_relative_to(CODEX / 'skills')], desired).items():
+        if path.name == 'SKILL.md':
+            data = data.decode('utf-8').replace('Codex', 'Cursor').replace('$sdlc-', '/sdlc-').encode('utf-8')
+        desired[CURSOR / path.relative_to(CODEX)] = data
     return desired
 
 
@@ -91,7 +97,7 @@ def sync(root=ROOT, check=False):
     if (root / RESOURCE_RECORD).exists():
         owned = {Path(p) for p in json.loads((root / RESOURCE_RECORD).read_text(encoding='utf-8'))}
     for path in owned:
-        if '..' in path.parts or path.is_absolute() or not any(path.is_relative_to(p / 'skills') for p in (CLAUDE, CODEX)):
+        if '..' in path.parts or path.is_absolute() or not any(path.is_relative_to(p / 'skills') for p in (CLAUDE, CODEX, CURSOR)):
             raise ValueError(f'Недопустимый путь ресурса: {path}')
     stale = owned - desired.keys()
     desired[RESOURCE_RECORD] = encoded(sorted(p.as_posix() for p in desired))

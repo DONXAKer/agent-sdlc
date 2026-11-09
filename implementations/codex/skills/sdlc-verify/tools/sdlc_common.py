@@ -13,6 +13,7 @@ import json
 import locale
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -203,12 +204,45 @@ def decode_console(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def command_tokens(cmd: str, posix=None) -> list:
+    """Разбери простую команду по правилам оболочки run_shell, без исполнения."""
+    if posix is None:
+        posix = not sys.platform.startswith("win") or bool(git_bash())
+    if posix:
+        parts = shlex.split(cmd or "", posix=True)
+    else:
+        # cmd.exe: обратная косая черта остаётся частью пути, ^ экранирует вне кавычек.
+        parts, word, quoted, started = [], [], False, False
+        text, i = cmd or "", 0
+        while i < len(text):
+            char = text[i]
+            if char == '"':
+                quoted, started = not quoted, True
+            elif char == '^' and not quoted and i + 1 < len(text):
+                i += 1
+                word.append(text[i])
+                started = True
+            elif char.isspace() and not quoted:
+                if started:
+                    parts.append(''.join(word))
+                    word, started = [], False
+            else:
+                word.append(char)
+                started = True
+            i += 1
+        if quoted:
+            raise ValueError("Незакрытые двойные кавычки")
+        if started:
+            parts.append(''.join(word))
+    if posix:
+        while parts and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", parts[0]):
+            parts.pop(0)
+    return parts
+
+
 def first_token(cmd: str) -> str:
-    for part in (cmd or "").split():
-        if "=" in part and not part.startswith(("./", ".\\", "/")) and "/" not in part and "\\" not in part:
-            continue  # префикс окружения VAR=x
-        return part
-    return ""
+    parts = command_tokens(cmd)
+    return parts[0] if parts else ""
 
 
 def git_bash():

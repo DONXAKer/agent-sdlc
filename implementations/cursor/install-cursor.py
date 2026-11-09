@@ -32,7 +32,7 @@ def plain_path(base, name):
             continue
         if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0):
             raise ValueError(f'Ссылка или reparse point в пути: {part}')
-    if not target.resolve().is_relative_to(base):
+    if not target.resolve().is_relative_to(base.resolve()):
         raise ValueError(f'Путь выходит за корень: {target}')
     return target
 

@@ -18,6 +18,15 @@ spec.loader.exec_module(installer)
 
 
 class CursorTests(unittest.TestCase):
+    def test_source_root_alias_is_compared_after_resolution(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / 'source'
+            source.mkdir()
+            (source / 'manifest.json').write_bytes(b'{}')
+            alias = source / '..' / source.name
+            self.assertEqual(installer.plain_path(alias, 'manifest.json').resolve(),
+                             (source / 'manifest.json').resolve())
+
     def test_junction_or_symlink_is_rejected_before_writes(self):
         with tempfile.TemporaryDirectory() as temp:
             project, outside = Path(temp) / 'project', Path(temp) / 'outside'

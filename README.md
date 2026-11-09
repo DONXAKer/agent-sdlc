@@ -117,6 +117,21 @@ cd agent-sdlc
 Для Claude Code перейди в `agent-sdlc-claude-code/` и выполни те же команды `bash install.sh`.
 Файл `SHA256SUMS` содержит контрольные суммы ZIP.
 
+Те же ZIP архивы публикуются как OCI пакет в GitHub Container Registry:
+`ghcr.io/donxaker/agent-sdlc:<версия>` и `ghcr.io/donxaker/agent-sdlc:latest`.
+Для публичного скачивания установи видимость пакета `Public` в настройках пакета после первой публикации.
+Если пакет приватный, сначала выполни `docker login ghcr.io` с токеном, которому разрешено чтение пакетов.
+Чтобы извлечь комплект, скачай образ и скопируй файлы:
+
+```bash
+docker pull ghcr.io/donxaker/agent-sdlc:<версия>
+docker create --name agent-sdlc ghcr.io/donxaker/agent-sdlc:<версия>
+docker cp agent-sdlc:/packages/agent-sdlc-codex.zip .
+docker cp agent-sdlc:/packages/agent-sdlc-claude-code.zip .
+docker cp agent-sdlc:/packages/SHA256SUMS .
+docker rm agent-sdlc
+```
+
 ### Codex
 
 Требуются Python 3.11+, Git и авторизованный Codex с поддержкой пользовательских агентов.
@@ -210,7 +225,7 @@ Workflow [distribution.yml](.github/workflows/distribution.yml) запускае
 
 Для релиза обнови `version` в `implementations/codex/manifest.json` и выполни команды выше.
 Сохрани изменения в коммите. Затем создай и отправь тег `v<версия>` для этого коммита.
-Workflow проверяет совпадение версии и тега, проверяет актуальность установочных копий и публикует архивы в GitHub Releases.
+Workflow проверяет совпадение версии и тега, проверяет актуальность установочных копий, публикует архивы в GitHub Releases и OCI пакет в GitHub Container Registry.
 
 Синхронизация и проверка ресурсов работают через Python без Bash: `python tools/distribution.py check`.
 Каталог `dist/` содержит воспроизводимые архивы. При расхождении ресурсов упаковка останавливается.

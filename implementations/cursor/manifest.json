@@ -31,7 +31,7 @@
     "skills/sdlc-verify/tools/flow-verdict.py": "7c644ac676424eaff16db6a96640546f15bfc5263f15e47ddeb164e8cb467709",
     "skills/sdlc-verify/tools/gates-preflight.py": "c89a91836d2cc80e4d04057f08366a823821a335f18bc135d30a0b082d540ab5",
     "skills/sdlc-verify/tools/gates/_common.py": "e7e0779b9d2c2812b7bbd238770513a4f7cc7e88f5b53ff3357ea312f97e8ec0",
-    "skills/sdlc-verify/tools/gates/anti_bypass.py": "5f339c1e356517ddedfd46eac4ce2735fe5910f1ad66e8940649d53d6311b3a9",
+    "skills/sdlc-verify/tools/gates/anti_bypass.py": "232ce4c30d6509bdf9f6fcc88f57b0f72b2ea33b266a31d429e5990bf052c343",
     "skills/sdlc-verify/tools/gates/scope.py": "41030b1194dce61094e7ebc3ff5efc89832768f84f06b64c01219a4aa33b06a4",
     "skills/sdlc-verify/tools/gates/secrets.py": "030d5260d71fa479b3bbaaa10d5197d152bb73eb61a8bc78fd8d42fc8a1702ad",
     "skills/sdlc-verify/tools/gates/tests_claims.py": "86dce1e0bdfb01096dda1fc71ad343fde2c1be35aabdc42113c003e064a1a0a3",
@@ -40,7 +40,7 @@
     "skills/sdlc-verify/tools/review-validate.py": "0687fdc300d6244aacfc1f07f70c13edd4455060cb7159e704d68dc0adcafb5c",
     "skills/sdlc-verify/tools/scaffold.py": "11b21cd09e308e04fda2a8b1f9dfa7e7a1ac1db7acf46a7e33e0a730bc193fc1",
     "skills/sdlc-verify/tools/sdlc-constants.json": "8ea494640936ea9cb5820364dda92d2d7f2464563d35c4bf9d6bcefbb03d3994",
-    "skills/sdlc-verify/tools/sdlc_common.py": "ca2d0f0030ceb40fcffae88729b4aae53f1270f8c2501e02a62b184c27d32a8b",
+    "skills/sdlc-verify/tools/sdlc_common.py": "3c36433aaa6494db8974350d215aaeede1992cac7125518d3e8be5890c5b311e",
     "skills/sdlc-verify/tools/state_contract.py": "a9a69c044da9b53e856675ad787763f48c7f88e27ad50c062d0c4a2ebc56082d",
     "skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json": "cd09a09030aee705c9ba408cefb21302fa2f2799528aafbef4ccbcc9672b6e8f",
     "skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json": "502ddfeafda8a9ede306375431846d45afab51e84b195148d5f33a34e2dcbb3b"

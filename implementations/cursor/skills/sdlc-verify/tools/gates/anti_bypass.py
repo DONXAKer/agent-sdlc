@@ -114,12 +114,12 @@ def lua_patch_declarations(patch):
             if sign in (' ', '-'):
                 code, old_state = lua_code(text, old_state)
                 if sign == '-':
-                    declarations[path, old_line, sign] = bool(re.search(r'(?<![\w.:])assert\s*\(', code))
+                    declarations[path, old_line, sign] = len(re.findall(r'(?<![\w.:])assert\s*\(', code))
                 old_line += 1
             if sign in (' ', '+'):
                 code, new_state = lua_code(text, new_state)
                 if sign == '+':
-                    declarations[path, new_line, sign] = bool(re.search(r'(?<![\w.:])assert\s*\(', code))
+                    declarations[path, new_line, sign] = len(re.findall(r'(?<![\w.:])assert\s*\(', code))
                 new_line += 1
     return declarations, uncertain
 
@@ -158,12 +158,12 @@ def main() -> int:
     declarations = {}
     for path, line, sign, text in hunks:
         if Path(path).suffix in ('.lua', '.luau'):
-            recognized = path not in uncertain and test_path(path) and lua_declarations.get((path, line, sign), False)
+            recognized = lua_declarations.get((path, line, sign), 0) if path not in uncertain and test_path(path) else 0
         else:
             recognized = any(re.search(rx, text) for rx in DECLARATIONS)
         declarations[path, line, sign] = recognized
-    plus = sum(1 for p, ln, s, _ in hunks if s == "+" and declarations[p, ln, s])
-    minus = sum(1 for p, ln, s, _ in hunks if s == "-" and declarations[p, ln, s])
+    plus = sum(declarations[p, ln, s] for p, ln, s, _ in hunks if s == "+")
+    minus = sum(declarations[p, ln, s] for p, ln, s, _ in hunks if s == "-")
     net = plus - minus
     if net < 0 and not allow_loss:
         evidence.append(f"нетто-убыль тестовых деклараций: +{plus} / −{minus} = {net} — без объяснения в плане")

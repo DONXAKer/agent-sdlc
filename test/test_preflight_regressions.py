@@ -65,6 +65,23 @@ class PreflightRegressions(unittest.TestCase):
         self.assertTrue(result['configuration_error'])
         self.assertFalse(result['blocked_env'])
 
+    def test_missing_mandatory_gate_blocks_preflight(self):
+        self.write(f'`"{Path(sys.executable).as_posix()}" -c "pass"`')
+        path = self.root / '.sdlc/gates.md'
+        lines = path.read_text(encoding='utf-8').splitlines()
+        path.write_text('\n'.join(line for line in lines if not line.startswith('| Тесты |')), encoding='utf-8')
+        code, result = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertTrue(result['configuration_error'])
+        self.assertFalse(result['blocked_env'])
+
+    def test_aligned_markdown_separator_is_allowed(self):
+        self.write(f'`"{Path(sys.executable).as_posix()}" -c "pass"`')
+        path = self.root / '.sdlc/gates.md'
+        path.write_text(path.read_text(encoding='utf-8').replace('|---|---|---|---|', '|:---|---:|:---:|---|'),
+                        encoding='utf-8')
+        self.assertEqual(self.run_cli()[0], 0)
+
     def test_only_registered_review_is_allowed_without_cli(self):
         self.write(f'`"{Path(sys.executable).as_posix()}" -c "pass"`', 'агент sdlc-reviewer')
         self.assertEqual(self.run_cli()[0], 1)
@@ -105,6 +122,18 @@ class PreflightRegressions(unittest.TestCase):
         code, result = self.run_cli()
         self.assertEqual(code, 1)
         self.assertTrue(result['configuration_error'])
+
+    def test_posix_double_quote_escapes_match_shell(self):
+        if sys.platform == 'win32' and not common.git_bash():
+            self.skipTest('Для проверки нужен POSIX shell')
+        script = self.root / 'check$file.py'
+        script.write_text('pass', encoding='utf-8')
+        escaped_script = script.as_posix().replace('$', r'\$')
+        command = f'"{Path(sys.executable).as_posix()}" "{escaped_script}"'
+        self.assertEqual(common.run_shell(command, self.root)[0], 0)
+        self.write(f'`{command}`')
+        self.assertEqual(self.run_cli()[0], 0)
+        self.assertEqual(common.command_tokens(r'python "check\`file.py"', posix=True), ['python', 'check`file.py'])
 
     def test_posix_comment_quotes_do_not_block_valid_command(self):
         command = f'"{Path(sys.executable).as_posix()}" -c "pass" # "'

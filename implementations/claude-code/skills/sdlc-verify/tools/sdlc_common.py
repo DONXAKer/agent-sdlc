@@ -88,7 +88,7 @@ def gate_rows(gates_text: str):
     rows = []
     for m in GATE_ROW.finditer(gates_text or ""):
         name, on, stage, how = (g.strip() for g in m.groups())
-        if name in ("Гейт", "") or set(name) <= {"-"}:
+        if name in ("Гейт", "") or set(name) <= {"-", ":"}:
             continue
         rows.append((name, on, stage, how))
     return rows
@@ -121,7 +121,11 @@ def gate_configuration_errors(text: str):
             if len(cells) == 5:
                 debt[cells[0]] = cells[1:]
     errors = []
-    for name, on, _, _ in gate_rows('\n'.join(table)):
+    rows = gate_rows('\n'.join(table))
+    for name in MANDATORY_GATES:
+        if not any(row[0] == name for row in rows):
+            errors.append((name, 'Обязательный гейт отсутствует в наборе'))
+    for name, on, _, _ in rows:
         if not re.match(r'^(?:да|нет)(?!\w)', on) or re.search(r'\b(?:да\s*/\s*нет|нет\s*/\s*да)\b', on):
             errors.append((name, f'Неизвестное значение «Вкл»: {on!r}; укажи «да» или «нет»'))
         elif name in MANDATORY_GATES and not enabled(on):
@@ -254,6 +258,9 @@ def command_tokens(cmd: str, posix=None) -> list:
                     continue
                 comment = False
             if escaped:
+                # shlex сохраняет эти escape в двойных кавычках, а POSIX shell снимает их.
+                if quote == '"' and char in '$`':
+                    clean.pop()
                 clean.append(char)
                 escaped, boundary = False, False
                 continue

@@ -126,6 +126,18 @@ class ScopeTests(Base):
 
 
 class AntiBypassTests(Base):
+    def test_luau_counts_calls_on_one_line(self):
+        path = 'tools/studio/probe_check.luau'
+        extra = ('--test-path', 'tools/studio/*.luau')
+        p = self.write_patch({path: (['assert(a); assert(b)'], ['assert(a)'])})
+        rc, result, _ = run('anti_bypass.py', p, *extra)
+        self.assertEqual((rc, result['status']), (1, 'fail'))
+        self.assertTrue(any('+1 / −2 = -1' in item for item in result['evidence']))
+        p = self.write_patch({path: (['assert(a); assert(b)'], ['assert(a)', 'assert(b)'])})
+        rc, result, _ = run('anti_bypass.py', p, *extra)
+        self.assertEqual((rc, result['status']), (0, 'pass'))
+        self.assertIn('деклараций +0', result['detail'])
+
     def test_declared_luau_qa_paths(self):
         path = 'tools/studio/probe_check.luau'
         extra = ('--test-path', 'tools/studio/*.luau')

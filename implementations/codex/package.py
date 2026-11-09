@@ -1,4 +1,11 @@
 """Упакуй только файлы, перечисленные в проверенном манифесте Codex."""
+
+# Вывод не должен зависеть от системной кодировки Windows и перенаправления в CI.
+import sys
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 from pathlib import Path
 import hashlib
 import json

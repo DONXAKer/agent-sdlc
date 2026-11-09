@@ -1,3 +1,10 @@
+
+# Вывод не должен зависеть от системной кодировки Windows и перенаправления в CI.
+import sys
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 import hashlib, json, shutil, subprocess, sys, tempfile, tomllib
 from pathlib import Path
 root=Path(__file__).resolve().parent

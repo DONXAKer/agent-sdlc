@@ -1,4 +1,11 @@
 """Установка переносимого комплекта Agent-SDLC. Требуется Python 3.11+."""
+
+# Вывод не должен зависеть от системной кодировки Windows и перенаправления в CI.
+import sys
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 import argparse
 import hashlib
 import json

@@ -1,6 +1,7 @@
 """Регрессии синхронизации и упаковки без изменения исходного checkout."""
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -132,6 +133,23 @@ class DistributionTests(unittest.TestCase):
                 path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n'))
         self.assertTrue(distribution.sync(self.root, check=True))
         subprocess.run([sys.executable, str(self.root / distribution.CODEX / 'test_package.py')], check=True)
+
+    def test_windows_legacy_stdout_encoding(self):
+        env = dict(os.environ, PYTHONUTF8='0', PYTHONIOENCODING='cp1252:strict')
+        tools = self.root / 'tools'
+        tools.mkdir()
+        shutil.copy2(ROOT / 'tools/distribution.py', tools / 'distribution.py')
+        commands = [
+            [str(tools / 'distribution.py'), 'sync'],
+            [str(tools / 'distribution.py'), 'check'],
+            [str(self.root / distribution.CODEX / 'test_package.py')],
+            [str(self.root / distribution.CODEX / 'package.py')],
+        ]
+        for args in commands:
+            result = subprocess.run([sys.executable, *args], env=env,
+                                    capture_output=True, encoding='utf-8', errors='strict')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn('UnicodeEncodeError', result.stderr)
 
     def test_package_rejects_stale_resources(self):
         (self.root / 'SDLC.md').write_text('Изменено', encoding='utf-8')

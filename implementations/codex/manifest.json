@@ -6,8 +6,8 @@
     "agents/sdlc-methodologist.toml": "9359af045b2571377f67ecffcc04e943bfefce1292fef14492b920a2ba50459d",
     "agents/sdlc-reviewer.toml": "1907edfabe5f15aac36283267dde0f341c6297352761109e928af4f608e81182",
     "generated-resources.json": "2a1e6851d325eff3771c446b2d4bef9266920c7a9d7ffa18d63ca7f0e1e7ec1c",
-    "install-codex.py": "3dd8b2d9a4365144811fddc0d8f475362ffd523fa267ee38ef79b5c18c6cb935",
-    "package.py": "de83b289e97ce47aa53f7b0f5e8fd02fb29f95450d39fbbe96335c168de54b42",
+    "install-codex.py": "a955a02f5bdc43521e425b6e31793d9d258149e786ca863a201ca3473ab47942",
+    "package.py": "2f695db413d953645f57b582fded90a36c691efd28ab352eef3d501e85a357cb",
     "skills/sdlc-ask/SKILL.md": "e2af7746d3394913c6945f04751952187317a2e8890b9335ec00d19056d6da8f",
     "skills/sdlc-chunk/SKILL.md": "4f99c4ecfda6985da5e8c014ea425128b47838624b2568c88562cc54ff3af20d",
     "skills/sdlc-explore/SKILL.md": "6f25c1a3f9e98ca16aca7c400b5d5983aefb3517c1b1e8d21f8ef11f7851c4aa",
@@ -47,7 +47,7 @@
     "skills/sdlc-verify/tools/state_contract.py": "a9a69c044da9b53e856675ad787763f48c7f88e27ad50c062d0c4a2ebc56082d",
     "skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json": "cd09a09030aee705c9ba408cefb21302fa2f2799528aafbef4ccbcc9672b6e8f",
     "skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json": "502ddfeafda8a9ede306375431846d45afab51e84b195148d5f33a34e2dcbb3b",
-    "test_package.py": "2c1e0bf145626beaeb6dba8e45fde40118196583f8898a305e928f5b58a7ee61"
+    "test_package.py": "ad9294eb0e74c30ebe32fd2515e7ba093c45cbd87900a44dd6c4fddaa1428df9"
   },
   "version": "0.1.0"
 }

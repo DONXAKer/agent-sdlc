@@ -21,6 +21,9 @@ class ContextEvidenceTests(unittest.TestCase):
     write = fixtures.SnapshotTests.write
 
     def prepare(self, n=1, env=None):
+        journal = self.d / f'chunk-{n}-journal.md'
+        if not journal.exists():
+            journal.write_text('**Подтвердил:** Оператор\n## Попытки\n', encoding='utf-8')
         locator = self.d / f'locator-{n}.md'
         locator.write_text('Точка правки: app.py, answer.\n', encoding='utf-8')
         return self.tool('attempt-evidence.py', 'prepare', self.root, 'T-1', n, '--locator', locator.name, env=env)
@@ -85,6 +88,7 @@ class ContextEvidenceTests(unittest.TestCase):
         self.plan.write_text(self.plan.read_text(encoding='utf-8').replace('snapshot', 'git'), encoding='utf-8')
         (self.root / 'app.py').write_bytes(b'answer = 2\r\n')
         (self.d / 'locator.md').write_text('Точка правки: app.py.\n', encoding='utf-8')
+        (self.d / 'chunk-1-journal.md').write_text('**Подтвердил:** Оператор\n', encoding='utf-8')
         env = dict(os.environ, GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='diff.noprefix', GIT_CONFIG_VALUE_0='true')
         result = self.tool('attempt-evidence.py', 'prepare', self.root, 'T-1', 1, '--locator', 'locator.md', env=env)
         self.assertEqual(result.returncode, 1)

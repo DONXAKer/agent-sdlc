@@ -221,10 +221,10 @@ def files_to_touch(plan_text: str):
 GIT_BASE = ["git", "-c", "core.quotepath=false"]
 
 
-def git_run(args, cwd):
+def git_run(args, cwd, input=None):
     """(rc, stdout, stderr) — байты декодируются вручную, переводы строк не трогаются."""
     try:
-        proc = subprocess.run(GIT_BASE + list(args), cwd=cwd, capture_output=True)
+        proc = subprocess.run(GIT_BASE + list(args), cwd=cwd, capture_output=True, input=input)
     except FileNotFoundError:
         return 127, "", "git: not found"
     return proc.returncode, proc.stdout.decode("utf-8", errors="surrogateescape"), \

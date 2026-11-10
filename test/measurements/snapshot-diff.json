@@ -1,0 +1,20 @@
+{
+  "platform": "Windows",
+  "python": "3.14",
+  "git": "2.53.0.windows.2",
+  "command": "python -B test/benchmark_snapshot_diff.py",
+  "unchanged_payload_files": 128,
+  "unchanged_payload_bytes_per_file": 65544,
+  "full": {
+    "files_written": 260,
+    "bytes_written": 16779318,
+    "elapsed_seconds": 7.940829
+  },
+  "changed_only": {
+    "files_written": 2,
+    "bytes_written": 24,
+    "elapsed_seconds": 1.492263
+  },
+  "patches_equal": true,
+  "scope": "Один последовательный прогон каждого алгоритма на одном дереве. Время включает load, проверку manifest и всех blob-хэшей. Счётчики учитывают materialize; служебные записи Git исключены. Параллельно выполнялись адресные регрессии. Типичный коэффициент ускорения не измерен."
+}

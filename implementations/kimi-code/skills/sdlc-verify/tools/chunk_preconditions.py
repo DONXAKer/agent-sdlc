@@ -1,6 +1,7 @@
 """Квитанция предусловий: связывает раннюю подготовку с базой и свидетельствами попыток."""
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,6 +15,12 @@ def receipt_path(d, n):
 
 def text_digest(path):
     return snapshot_base.digest(path.read_text(encoding='utf-8').encode('utf-8'))
+
+
+def contour(intent):
+    match = re.search(r'\*\*Контур:\*\*[^\S\n]*([^\n]*)', intent or '', re.I)
+    value = match.group(1).strip().casefold() if match else ''
+    return 'мелкий' if re.fullmatch(r'мелкий(?:\s+—\s+[^/\n]+)?', value) else 'полный'
 
 
 def artifact(d, name):
@@ -38,6 +45,9 @@ def create(root, d, n, locator, current_diff, capture_baseline):
     locator_path = artifact(d, locator)
     if not locator_path.read_bytes().strip():
         raise ValueError('Отчёт locator пуст')
+    journal = artifact(d, f'chunk-{n}-journal.md')
+    if not journal.read_bytes().strip():
+        raise ValueError('Журнал chunk пуст; создай его до prepare и первой попытки')
     if int(n) == 1:
         touched = {record['path'] for record in patch_files(current_diff)}
         if touched & planned:
@@ -67,6 +77,7 @@ def create(root, d, n, locator, current_diff, capture_baseline):
               'locator': {'path': locator, 'sha256': text_digest(locator_path)},
               'baseline_sha256': text_digest(baseline),
               'initial_diff_sha256': snapshot_base.digest(current_diff.encode('utf-8', errors='surrogateescape')),
+              'contour': contour(read(d / 'intent.md', '')),
               'recorded_at': datetime.now(timezone.utc).isoformat(timespec='seconds')}
     plan_archive = d / f'.chunk-{n}-plan.md'
     if plan_archive.exists() and text_digest(plan_archive) != record['plan_sha256']:
@@ -75,6 +86,13 @@ def create(root, d, n, locator, current_diff, capture_baseline):
         with plan_archive.open('xb') as output:
             output.write((d / 'plan.md').read_bytes())
     record['plan_path'] = plan_archive.name
+    journal_archive = d / f'.chunk-{n}-initial-journal.md'
+    if journal_archive.exists() and text_digest(journal_archive) != text_digest(journal):
+        raise ValueError('Начальная редакция журнала уже существует и отличается')
+    if not journal_archive.exists():
+        with journal_archive.open('xb') as output:
+            output.write(journal.read_bytes())
+    record['journal'] = {'path': journal_archive.name, 'sha256': text_digest(journal_archive)}
     with target.open('x', encoding='utf-8') as output:
         json.dump(record, output, ensure_ascii=False, indent=2)
         output.write('\n')
@@ -92,7 +110,8 @@ def errors(root, d, n, expected_hash=None, historical=False):
         if expected_hash is not None and snapshot_base.digest(raw) != expected_hash:
             return ['Квитанция изменена после записи evidence']
         if (rec.get('version') != 1 or rec.get('tool') != 'attempt-evidence.py prepare' or rec.get('status') != 'ready'
-                or rec.get('slug') != d.name or rec.get('chunk') != int(n)):
+                or rec.get('slug') != d.name or rec.get('chunk') != int(n)
+                or rec.get('contour') not in ('мелкий', 'полный')):
             return ['Недопустимая квитанция предусловий']
         base, _ = snapshot_base.load(root, d)
         archived = artifact(d, rec['plan_path'])
@@ -100,6 +119,16 @@ def errors(root, d, n, expected_hash=None, historical=False):
             return ['Историческая редакция плана изменена']
         if rec.get('base') != base or (not historical and rec.get('plan_sha256') != text_digest(d / 'plan.md')):
             return ['База или план изменились после квитанции']
+        initial_journal = rec.get('journal')
+        if not isinstance(initial_journal, dict):
+            return ['Нет начальной редакции журнала в квитанции; порядок его создания не доказан']
+        archived_journal = artifact(d, initial_journal['path'])
+        if (initial_journal['path'] != f'.chunk-{n}-initial-journal.md'
+                or not archived_journal.read_bytes().strip()
+                or text_digest(archived_journal) != initial_journal.get('sha256')):
+            return ['Начальная редакция журнала изменена или пуста']
+        if not artifact(d, f'chunk-{n}-journal.md').read_bytes().strip():
+            return ['Журнал chunk пуст']
         locator = rec['locator']
         if text_digest(artifact(d, locator['path'])) != locator['sha256']:
             return ['Отчёт locator изменился после квитанции']

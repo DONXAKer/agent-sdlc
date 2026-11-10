@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import tempfile
+import zlib
 from pathlib import Path, PurePosixPath
 
 from sdlc_common import ARTIFACTS_DIR, git_run, is_junk_path, read, require_base_sha
@@ -124,21 +125,40 @@ def snapshot_diff(root, files):
     """Сравни сырые байты через отдельный Git index без фильтров рабочего проекта."""
     # Новое правило ignore не удаляет ранее сохранённый файл из сравнения.
     current = project_files(root, files)
+    # Чтение и проверка полной базы остаются в load. Сокращаем только временную запись.
+    changed = {name for name in files.keys() | current.keys() if files.get(name) != current.get(name)}
+    before_files = {name: files[name] for name in changed if name in files}
+    after_files = {name: current[name] for name in changed if name in current}
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp)
-        def git(*args):
+        def git(*args, input=None):
             rc, out, err = git_run(['-c', 'core.autocrlf=false', '-c', 'core.filemode=true',
-                                    '-c', 'core.attributesFile=', *args], tree)
+                                    '-c', 'core.attributesFile=', *args], tree, input=input)
             if rc:
                 raise ValueError(f'Не удалось сравнить снимок: {err}')
             return out
         git('init', '-q')
+        object_format = git('rev-parse', '--show-object-format').strip()
+        def write_tree(records):
+            entries = []
+            for name, (data, mode) in records.items():
+                raw = f'blob {len(data)}\0'.encode('ascii') + data
+                oid = hashlib.new(object_format, raw).hexdigest()
+                target = tree / '.git/objects' / oid[:2] / oid[2:]
+                if not target.exists():
+                    target.parent.mkdir(exist_ok=True)
+                    target.write_bytes(zlib.compress(raw))
+                entries.append(f'100{mode:o} {oid}\t'.encode('ascii') + name.encode('utf-8', errors='surrogateescape') + b'\0')
+            git('read-tree', '--empty')
+            git('update-index', '-z', '--index-info', input=b''.join(entries))
+            return git('write-tree').strip()
         # .gitattributes исходного проекта не должны преобразовать исходные байты.
         attributes = tree / '.git/info/attributes'
         attributes.write_text('* -text -filter -ident -working-tree-encoding\n', encoding='utf-8')
-        materialize(files, tree)
-        git('add', '--all', '--force')
-        before = git('write-tree').strip()
+        materialize(before_files, tree)
+        # Полные Git-объекты сохраняют прежние сокращения SHA, включая коллизии префиксов.
+        # Байты неизменённых файлов пишутся только как служебные сжатые blobs, без рабочей копии.
+        before = write_tree(files)
         for child in tree.iterdir():
             if child.name != '.git':
                 if not child.resolve().is_relative_to(tree.resolve()):
@@ -147,9 +167,18 @@ def snapshot_diff(root, files):
                     shutil.rmtree(child)
                 else:
                     child.unlink()
-        materialize(current, tree)
-        git('add', '--all', '--force')
-        after = git('write-tree').strip()
+        materialize(after_files, tree)
+        after = write_tree(current)
+        # Получи diff-атрибут из полного after index. Зафиксируй его для каждого пути:
+        # Git diff не обязан читать отсутствующие в рабочей копии .gitattributes из index.
+        names = b''.join(name.encode('utf-8', errors='surrogateescape') + b'\0' for name in sorted(changed))
+        resolved = git('check-attr', '--cached', '-z', 'diff', '--stdin', input=names).split('\0')
+        with attributes.open('a', encoding='utf-8') as output:
+            for index in range(0, len(resolved) - 1, 3):
+                name, _, value = resolved[index:index + 3]
+                pattern = '/' + ''.join('\\' + c if c in '*?[]\\' else c for c in name)
+                setting = {'set': 'diff', 'unset': '-diff', 'unspecified': '!diff'}.get(value, 'diff=' + value)
+                output.write(json.dumps(pattern, ensure_ascii=False) + ' ' + setting + '\n')
         return git('diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-renames', '--no-color',
                    '--src-prefix=a/', '--dst-prefix=b/', '--output-indicator-new=+',
                    '--output-indicator-old=-', '--output-indicator-context= ', before, after, '--')

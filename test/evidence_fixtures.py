@@ -26,4 +26,9 @@ def parser_receipt(d, n=1):
               'baseline_sha256': chunk_preconditions.text_digest(baseline),
               'initial_diff_sha256': snapshot_base.digest(b''), 'recorded_at': '2000-01-01T00:00:00+00:00'}
     record['plan_path'] = archived.name
+    journal = d / f'.chunk-{n}-initial-journal.md'
+    journal.write_bytes((d / f'chunk-{n}-journal.md').read_bytes())
+    record['journal'] = {'path': journal.name, 'sha256': chunk_preconditions.text_digest(journal)}
+    intent = d / 'intent.md'
+    record['contour'] = chunk_preconditions.contour(intent.read_text(encoding='utf-8') if intent.exists() else '')
     chunk_preconditions.receipt_path(d, n).write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

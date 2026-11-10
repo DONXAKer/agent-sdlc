@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sdlc_common import (  # noqa: E402  — константы и разбор: один источник на все инструменты
     ACTIONS, AXES, CHUNK_FILES, CHUNK_LINES, CONSTANTS, DEFAULT_BUDGET as _DEFAULT_BUDGET,
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
-    gate_configuration_errors,
+    gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path,
 )
 import snapshot_base
 import chunk_preconditions
@@ -117,12 +117,21 @@ def plan_approved(plan: str) -> bool:
     # отрезаем только хвост заготовки «/ не одобрен — …» (болд необязателен, пробелы любые);
     # слэш внутри значения («Иван / Оператор») не трогаем
     value = re.split(r"\s*/\s*\*{0,2}не одобрен", raw)[0]
+    # Ненужность повторного решения не отменяет ранее выданные полномочия.
+    value = re.sub(r"(?:отдельное\s+)?повторное\s+согласование\s+не\s+требуется", "", value, flags=re.I)
     # решение ещё не принято: отрицание или слово ожидания в значении — не одобрение,
     # даже если рядом стоит дата; сомнение трактуется как «не одобрен» (ложный провал громкий,
     # ложное «одобрен» пропускало бы неодобренный план молча)
     if re.search(r"(?<!\w)не\s|ожида|отложен|позже|вернуться|tbd|\?", value, re.I):
         return False
-    return bool(re.search(r"20\d\d", value)) or "источник: файл ответов" in value
+    authority = re.search(r"пользовател\w*\s+(?:явно\s+)?(?:поручил|разрешил|делегировал)([^;\n]*)", value, re.I)
+    execution = (r"вести\s+(?:цель|задачи)\b|"
+                 r"(?:выполнить|выполнение|выполнять)\s+(?:текущ\w*\s+)?(?:план\w*|реализаци\w*|задач[уи])\b|"
+                 r"реализовать\s+(?:текущ\w*\s+)?(?:план|задачу|изменения)\b")
+    delegated = (bool(authority and re.search(execution, authority.group(1), re.I))
+                 and not re.search(r"только\s+чтени|изучить|прочитать|исследова|\bаудит|\bанализ", authority.group(1), re.I)
+                 and bool(re.search(r"\$sdlc-run|AGENTS\.md|источник:\s*сообщение", value, re.I)))
+    return bool(re.search(r"20\d\d", value)) or "источник: файл ответов" in value or delegated
 
 
 def attempt_nums(journal: str):
@@ -161,6 +170,61 @@ def readiness_ok(readiness: str, n: int) -> bool:
 def journal_chunk_num(p: Path):
     m = re.search(r"chunk-(\d+)-journal", p.name)
     return m.group(1) if m else None
+
+
+def small_scope_errors(d, intent):
+    """Проверь область всего витка. Смена подписи не отменяет историческое отклонение."""
+    paths, problems = set(), []
+    documentation_config = {'.md', '.rst', '.txt', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+                            '.properties', '.conf', '.xml', '.env'}
+    config_names = {'.gitignore', '.gitattributes', '.editorconfig'}
+    code_types = {'.py', '.js', '.ts', '.jsx', '.tsx', '.c', '.cpp', '.h', '.hpp', '.java', '.go', '.rs',
+                  '.cs', '.php', '.rb', '.lua', '.luau', '.sh', '.bash', '.ps1', '.bat', '.cmd', '.sql',
+                  '.swift', '.kt', '.kts', '.scala', '.r', '.m', '.mm', '.v', '.vb', '.ipynb', '.vue',
+                  '.svelte', '.css', '.scss', '.sass', '.wasm'}
+    for patch in natsorted(d.glob('chunk-*-attempt-*-diff.patch')):
+        match = re.fullmatch(r'chunk-(\d+)-attempt-\d+-diff.patch', patch.name)
+        selected = chunk_preconditions.contour(intent)
+        try:
+            rec = json.loads(chunk_preconditions.receipt_path(d, match.group(1)).read_text(encoding='utf-8'))
+            selected = rec.get('contour', selected)
+        except (OSError, ValueError, AttributeError):
+            pass  # Повреждение квитанции проверяет отдельный гейт.
+        raw = patch.read_bytes()
+        text = raw.decode('utf-8', errors='surrogateescape')
+        paths.update(record['path'] for record in patch_files(text))
+        for line in text.splitlines():
+            header = DIFF_GIT.match(line)
+            if header:
+                paths.add(unquote_git_path(header.group(1) if header.group(1) is not None else header.group(2)))
+        if selected != 'мелкий' or len(paths) <= 1:
+            continue
+        code = sorted(name for name in paths if Path(name).suffix.casefold() in code_types)
+        unknown = {name for name in paths if Path(name).suffix.casefold() not in documentation_config
+                   and Path(name).name not in config_names and not Path(name).name.startswith('.env.')}
+        unknown.difference_update(code)
+        # Неизвестное расширение само по себе не является программным кодом.
+        # Рецензент связывает пофайловую классификацию с конкретным патчем, а не подписью плана.
+        review = read(patch.with_name(patch.name.replace('-diff.patch', '-review.md'))) or ''
+        pin = re.search(r'\*\*SHA-256 патча классификации:\*\*\s*`?([0-9a-f]{64})', review)
+        signer = re.search(r'\*\*Классификацию подтвердил:\*\*[^\S\n]*([^\n]*)$', review, re.M)
+        source = re.search(r'\*\*Источник классификации:\*\*[^\S\n]*(человек|независимый рецензент)[^\S\n]*$', review, re.M)
+        signed = bool(signer and signer.group(1).strip()
+                      and signer.group(1).strip().casefold() not in {'нет', 'н/п', '-', 'none', 'n/a'}
+                      and not re.search(r'(?<!\w)не\s|ожида|tbd|\?', signer.group(1), re.I)
+                      and not holes_in(signer.group(1)))
+        if pin and pin.group(1) == snapshot_base.digest(raw) and signed and source:
+            classified = {name.strip() for name, _, reason in re.findall(
+                r'^\|[^\S\n]*([^|\n]+?)[^\S\n]*\|[^\S\n]*(документация|конфигурация)[^\S\n]*\|[^\S\n]*([^|\n]+?)[^\S\n]*\|[^\S\n]*$', review, re.M)
+                          if reason.strip() and not holes_in(reason)}
+            unknown.difference_update(classified)
+        if code or unknown:
+            detail = ('программный код: ' + ', '.join(code) if code else '')
+            if unknown:
+                detail += ('; ' if detail else '') + 'назначение не подтверждено: ' + ', '.join(sorted(unknown))
+            problems.append(f'{patch.name}: {len(paths)} файлов; {detail}. '
+                            'Сохрани отклонение; переход на полный контур не меняет историю этой попытки')
+    return problems
 
 
 def plan_more_chunks(plan: str, cur: str) -> bool:
@@ -286,7 +350,8 @@ def do_metrics(root: Path) -> int:
             (k for k, p in enumerate(reports, 1)
              if re.search(r"\*\*passed:\*\*\s*true", read(p) or "")), None)
         ho = read(d / "handoff.md")
-        classes = [c.strip() for c in re.findall(r"^-\s*\*\*Класс:\*\*\s*(.+)", ho or "", re.M)]
+        classes = {c.strip() for c in re.findall(r"^-\s*\*\*Класс:\*\*\s*(.+)", ho or "", re.M)
+                   if c.strip().strip('*`_').strip().casefold() not in {'н/п', 'нет', 'не применимо', 'none', 'n/a', '-'}}
         rows.append(dict(
             slug=d.name, attempts=len(nums), reports=len(reports),
             budget=budget_of(j) if j else "-", passed_at=first_pass,
@@ -419,6 +484,10 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     diffs = natsorted(d.glob("chunk-*-attempt-*-diff.patch"))
     tests_out = natsorted(d.glob("chunk-*-attempt-*-tests.txt"))
     current_chunk = max((int(journal_chunk_num(path) or 0) for path in journals), default=0)
+    if diffs:
+        scope_problems = small_scope_errors(d, intent)
+        v.check(not scope_problems, 'контур допустим по фактическому diff', '; '.join(scope_problems),
+                'подпись в плане не заменяет проверку области; позднее изменение контура не исправляет историю')
 
     # --- 1. Артефакты на месте и непусты -----------------------------------------------------
     for name, obj, imp in [
@@ -442,7 +511,8 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     # chunk-N-attempt-K-review.md — сырой ответ рецензента (он вправе цитировать «‹причина›»),
     # plan-vK.md — прежняя редакция плана; оба не форма, скан их не судит.
     for name, text in texts.items():
-        if not text or name.endswith("-review.md") or re.match(r"plan-v\d+\.md$", name):
+        if (not text or name.endswith("-review.md") or re.match(r"plan-v\d+\.md$", name)
+                or re.fullmatch(r"\.chunk-\d+-initial-journal\.md", name)):
             continue
         holes = holes_in(text)
         detail = (f"{len(holes)} строк с плейсхолдером, первая: {holes[0].strip()[:60]}"
@@ -535,7 +605,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
         # заполненной четвёртой (опциональной GWT-колонкой)
         cells = [[c.strip() for c in r.split("|")] for r in rows]
         cells_ok = all(len(c) > 3 and c[2] and c[3] for c in cells)
-        small = bool(re.search(r"\*\*Контур:\*\*\s*мелкий", intent))
+        small = chunk_preconditions.contour(intent) == 'мелкий'
         edge = sum("[edge]" in r for r in rows)
         v.check(bool(rows), "в листе есть строки claim-N", "таблица листа пуста или не по форме",
                 "лист не в канонической форме — сверки слепнут")
@@ -718,7 +788,7 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                     'не создавай свидетельство готовности задним числом')
         if m:
             by_chunk.setdefault(int(m.group(1)), {})[int(m.group(2))] = rec.get("diffstat") or {}
-    explained = bool(re.search(r"почему этот chunk больше ориентира", plan or ""))
+    explained = bool(re.search(r"почему этот chunk больше ориентира", plan or "", re.I))
     prev_lines, prev_files = 0, 0
     for cn in sorted(by_chunk):
         stat = by_chunk[cn][max(by_chunk[cn])]

@@ -44,6 +44,9 @@ PASS означает ожидаемое поведение, включая ко
 
 ## Реализации
 
+Для OpenCode доступен [комплект из десяти навыков и четырёх субагентов](implementations/opencode/README.md).
+Установи его командой `python implementations/opencode/install-opencode.py <корень проекта>`.
+
 Для Cursor доступен [комплект навыков, агентов и правил](implementations/cursor/README.md).
 Установи его командой `python implementations/cursor/install-cursor.py <корень проекта>`.
 

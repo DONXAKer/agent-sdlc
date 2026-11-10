@@ -62,6 +62,8 @@ jobs:
             implementations/codex/generated-resources.json
             implementations/cursor/skills/**
             implementations/cursor/manifest.json
+            implementations/opencode/skills/**
+            implementations/opencode/manifest.json
             implementations/kimi-code/skills/**
             implementations/kimi-code/manifest.json
   release:

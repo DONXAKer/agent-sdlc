@@ -111,7 +111,9 @@ cd agent-sdlc
 Для установки без полного репозитория используй архив своего инструмента из
 [Releases](https://github.com/DONXAKer/agent-sdlc/releases) или артефактов workflow
 [«Комплекты SDLC»](https://github.com/DONXAKer/agent-sdlc/actions/workflows/distribution.yml).
-Релиз появляется после публикации тега `v<версия>`. Артефакты создаются при успешной сборке workflow.
+Каждый push в `main` публикует новую сборку в Releases и Packages после успешных проверок.
+Тег сборки имеет вид `main-<номер запуска>-<короткий SHA>`. Артефакты также доступны в workflow.
+Тег `v<версия>` публикует отдельный версионный релиз.
 
 Внутри комплектов Codex и Kimi Code установщик лежит в корне. После распаковки перейди в `agent-sdlc-codex/` или `agent-sdlc-kimi-code/`
 и замени команду установки из соответствующего раздела ниже на `python install-codex.py` или `python install-kimi-code.py`.
@@ -119,7 +121,7 @@ cd agent-sdlc
 Файл `SHA256SUMS` содержит контрольные суммы ZIP.
 
 Те же ZIP архивы публикуются как OCI пакет в GitHub Container Registry:
-`ghcr.io/donxaker/agent-sdlc:<версия>` и `ghcr.io/donxaker/agent-sdlc:latest`.
+`ghcr.io/donxaker/agent-sdlc:<тег сборки или релиза>` и `ghcr.io/donxaker/agent-sdlc:latest`.
 Для публичного скачивания установи видимость пакета `Public` в настройках пакета после первой публикации.
 Если пакет приватный, сначала выполни `docker login ghcr.io` с токеном, которому разрешено чтение пакетов.
 Чтобы извлечь комплект, скачай образ и скопируй файлы:
@@ -247,7 +249,11 @@ Workflow [distribution.yml](.github/workflows/distribution.yml) запускае
 Он публикует артефакты после проверок. При запуске на `main` отдельная задача создаёт PR синхронизации ресурсов, если обнаружены изменения.
 Для этого разреши создание pull requests через GitHub Actions в настройках репозитория.
 
-Для релиза обнови `version` в `implementations/codex/manifest.json` и выполни команды выше.
+Каждый push в `main` автоматически публикует новую сборку в GitHub Releases и GitHub Container Registry после успешных проверок.
+Уникальный тег включает номер запуска и SHA коммита. Повторный запуск обновляет файлы того же релиза.
+Версия в manifest при этом не изменяется. Поле `revision` в `build.json` указывает точный коммит.
+
+Для версионного релиза обнови `version` в `implementations/codex/manifest.json` и выполни команды выше.
 Сохрани изменения в коммите. Затем создай и отправь тег `v<версия>` для этого коммита.
 Workflow проверяет совпадение версии и тега, проверяет актуальность установочных копий, публикует архивы в GitHub Releases и OCI пакет в GitHub Container Registry.
 

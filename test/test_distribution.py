@@ -19,6 +19,18 @@ spec.loader.exec_module(distribution)
 
 
 class DistributionTests(unittest.TestCase):
+    def test_oci_payload_matches_published_checksums(self):
+        archives = distribution.package(self.root, revision='test-revision')
+        dockerfile = (ROOT / 'packages/Dockerfile').read_text(encoding='utf-8')
+        sources = [line.split()[1] for line in dockerfile.splitlines() if line.startswith('COPY ')]
+        copied = {path.name for path in (self.root / 'dist').iterdir()
+                  if any(fnmatch.fnmatchcase(path.name, source) for source in sources)}
+        checksums = (self.root / 'dist/SHA256SUMS').read_text(encoding='ascii')
+        for archive in archives:
+            self.assertIn(archive.name, copied)
+            self.assertIn('  ' + archive.name + '\n', checksums)
+        self.assertIn('SHA256SUMS', copied)
+
     def test_automation_includes_generated_cursor_changes(self):
         before = self.snapshot()
         source = self.root / 'SDLC.md'

@@ -17,7 +17,35 @@ python implementations/opencode/install-opencode.py <корень проекта
 Он проверяет контрольные суммы до записи и сохраняет изменённые файлы в `.opencode/sdlc-backup-*`.
 Настройки OpenCode и чужие файлы сохраняются. Глобальная установка этим установщиком не поддерживается.
 
-Открой новую сессию OpenCode. Напиши: «Загрузи навык sdlc-run и выполни задачу для slug example в указанном корне проекта».
+## Команды запуска
+
+Открой OpenCode командой `opencode` в корне целевого проекта.
+В сессии OpenCode запусти полный цикл:
+
+```text
+/sdlc-run slug example; задача: добавь требуемое поведение
+```
+
+Для продолжения передай тот же slug и корень проекта.
+Для отдельного этапа используй соответствующую команду:
+
+```text
+/sdlc-intent slug example; задача: добавь требуемое поведение
+/sdlc-explore slug example
+/sdlc-ask slug example
+/sdlc-plan slug example
+/sdlc-chunk slug example
+/sdlc-verify slug example
+/sdlc-handoff slug example
+/sdlc-retro slug example
+/sdlc-seed slug example
+```
+
+Установщик размещает команды в `.opencode/commands`.
+Команды загружают одноимённые навыки через `skill` и передают введённые аргументы.
+Формат описан в [документации команд OpenCode](https://opencode.ai/docs/commands/).
+
+Для запуска без команды напиши: «Загрузи навык sdlc-run и выполни задачу для slug example в указанном корне проекта».
 Для продолжения передай тот же slug и корень. Отдельные этапы загружай инструментом `skill` по имени.
 Роли `sdlc-claims`, `sdlc-locator`, `sdlc-reviewer`, `sdlc-methodologist` вызываются инструментом `subagent`.
 Основной агент передаёт им абсолютный путь к установленной методологии и минимальные входные данные.

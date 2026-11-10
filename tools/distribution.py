@@ -148,7 +148,7 @@ def sync(root=ROOT, check=False):
         path = Path(name)
         if path.is_relative_to(OPENCODE / 'skills') or path == OPENCODE / 'manifest.json':
             continue
-        if path.is_relative_to(OPENCODE / 'agents'):
+        if path.is_relative_to(OPENCODE / 'agents') or path.is_relative_to(OPENCODE / 'commands'):
             opencode_files[path.relative_to(OPENCODE).as_posix()] = canonical_bytes(root / path)
     desired.update({OPENCODE / name: data for name, data in opencode_files.items()})
     desired[OPENCODE / 'manifest.json'] = encoded({'version': manifest['version'], 'files': {

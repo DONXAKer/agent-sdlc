@@ -46,6 +46,8 @@ PASS означает ожидаемое поведение, включая ко
 
 Для OpenCode доступен [комплект из десяти навыков и четырёх субагентов](implementations/opencode/README.md).
 Установи его командой `python implementations/opencode/install-opencode.py <корень проекта>`.
+В сессии OpenCode запусти `/sdlc-run slug example; задача: опиши требуемое изменение`.
+Команды отдельных этапов перечислены в README комплекта.
 
 Для Cursor доступен [комплект навыков, агентов и правил](implementations/cursor/README.md).
 Установи его командой `python implementations/cursor/install-cursor.py <корень проекта>`.

@@ -223,6 +223,16 @@
     "implementations/opencode/skills/sdlc-verify/tools/sdlc_common.py",
     "implementations/opencode/skills/sdlc-verify/tools/state_contract.py",
     "implementations/opencode/skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json",
-    "implementations/opencode/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json"
+    "implementations/opencode/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
+    "implementations/opencode/commands/sdlc-run.md",
+    "implementations/opencode/commands/sdlc-intent.md",
+    "implementations/opencode/commands/sdlc-explore.md",
+    "implementations/opencode/commands/sdlc-ask.md",
+    "implementations/opencode/commands/sdlc-plan.md",
+    "implementations/opencode/commands/sdlc-chunk.md",
+    "implementations/opencode/commands/sdlc-verify.md",
+    "implementations/opencode/commands/sdlc-handoff.md",
+    "implementations/opencode/commands/sdlc-retro.md",
+    "implementations/opencode/commands/sdlc-seed.md"
   ]
 }

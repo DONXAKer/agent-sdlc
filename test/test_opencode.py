@@ -18,6 +18,20 @@ spec.loader.exec_module(installer)
 
 
 class OpenCodeTests(unittest.TestCase):
+    def test_commands_are_installed_with_matching_skills(self):
+        commands = sorted((SOURCE / 'commands').glob('*.md'))
+        self.assertEqual(len(commands), 10)
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp)
+            installer.install(project)
+            for command in commands:
+                self.assertTrue((SOURCE / 'skills' / command.stem / 'SKILL.md').is_file())
+                text = command.read_text(encoding='utf-8')
+                self.assertIn('$ARGUMENTS', text)
+                self.assertIn(command.stem, text)
+                self.assertEqual(command.read_bytes(),
+                                 (project / '.opencode/commands' / command.name).read_bytes())
+
     def test_source_root_alias_is_compared_after_resolution(self):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / 'source'

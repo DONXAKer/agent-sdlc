@@ -48,7 +48,7 @@ def install(project, check=False):
     changes = []
     for name, digest in manifest['files'].items():
         relative = Path(name)
-        if len(relative.parts) < 2 or relative.parts[0] not in ('skills', 'agents'):
+        if len(relative.parts) < 2 or relative.parts[0] not in ('skills', 'agents', 'commands'):
             raise ValueError(f'Недопустимый ресурс комплекта: {name}')
         source = plain_path(SOURCE, name)
         if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != digest:

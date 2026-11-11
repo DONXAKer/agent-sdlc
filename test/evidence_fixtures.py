@@ -31,4 +31,5 @@ def parser_receipt(d, n=1):
     record['journal'] = {'path': journal.name, 'sha256': chunk_preconditions.text_digest(journal)}
     intent = d / 'intent.md'
     record['contour'] = chunk_preconditions.contour(intent.read_text(encoding='utf-8') if intent.exists() else '')
-    chunk_preconditions.receipt_path(d, n).write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    # SHA квитанции должен сохраняться после Git-нормализации в чистом checkout.
+    chunk_preconditions.receipt_path(d, n).write_bytes((json.dumps(record, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))

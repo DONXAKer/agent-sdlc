@@ -382,6 +382,14 @@ class OpenIssueTests(fixtures.ContextEvidenceTests):
         rec = json.loads((self.d / 'chunk-1-attempt-1-evidence.json').read_bytes())
         self.assertEqual(rec['chunk_diff']['diffstat']['files'], 1)
 
+    def test_corpus_receipt_pin_survives_git_text_normalization(self):
+        d = ROOT / 'test/flow-verdict-corpus/snapshot-valid/.sdlc/snapshot-valid'
+        raw = (d / '.chunk-1-preconditions.json').read_bytes()
+        saved = json.loads((d / 'chunk-1-attempt-1-evidence.json').read_bytes())
+        self.assertEqual(saved['preconditions']['receipt_sha256'], snapshot_base.digest(raw))
+        canonical = raw.replace(b'\r\n', b'\n')
+        self.assertEqual(saved['preconditions']['receipt_sha256'], snapshot_base.digest(canonical))
+
 
 if __name__ == '__main__':
     unittest.main()

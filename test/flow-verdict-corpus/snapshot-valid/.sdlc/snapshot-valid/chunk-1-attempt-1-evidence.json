@@ -1,1 +1,15 @@
-{"base": {"kind": "snapshot", "id": "a6ac428b60ccedf97a32c046e6af355d7221a5bb5a8aac915b6af056cd83f7be"}, "diffstat": {"added": 0, "deleted": 0, "files": 0}, "preconditions": {"errors": [], "receipt_sha256": "a1746c437604f6a62e08555d8f46cd70ef8912a5ee2daf8b293174f9593046c8"}}
+{
+  "base": {
+    "kind": "snapshot",
+    "id": "a6ac428b60ccedf97a32c046e6af355d7221a5bb5a8aac915b6af056cd83f7be"
+  },
+  "diffstat": {
+    "added": 0,
+    "deleted": 0,
+    "files": 0
+  },
+  "preconditions": {
+    "errors": [],
+    "receipt_sha256": "d079b8fa75fd52924d2bb9c0af820c952e027ed88c55807251ac116e01af745b"
+  }
+}

@@ -142,6 +142,9 @@ def main() -> int:
         if path in uncertain or sign != "+" or not (is_test_or_config_path(path) or extra_test(path)):
             continue
         for rx, label in MARKERS:
+            # RSpec-маркеры относятся к Ruby. Литералы других языков не отключают RSpec.
+            if label.startswith('rspec:') and Path(path).suffix != '.rb':
+                continue
             if re.search(rx, text):
                 evidence.append(f"{path}:{ln} — маркер отключения/фокуса ({label}): {text.strip()[:80]}")
                 break

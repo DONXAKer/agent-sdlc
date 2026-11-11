@@ -124,6 +124,12 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         if previous_base != base:
             raise ValueError('База отличается от истории попыток; создай новый виток')
     diff = regenerate_diff(root, base_sha) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot)
+    chunk_diff = None
+    if chunk_preconditions.receipt_path(d, n).is_file():
+        receipt = json.loads(chunk_preconditions.receipt_path(d, n).read_bytes())
+        if 'tree' in receipt:
+            chunk_diff = snapshot_base.snapshot_diff(root, chunk_preconditions.load_tree(root, d, n),
+                                                     git_special=base['kind'] == 'git')
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rc, output = run_shell(tests_cmd, root)
     missing = missing_tool(output, tests_cmd, rc)
@@ -144,6 +150,13 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         "executor_model": executor_model or "unknown",
         "executor_model_source": "самоотчёт исполнителя (--executor-model)" if executor_model else "не записана",
     }
+    if chunk_diff is not None:
+        chunk_patch = d / f'chunk-{n}-attempt-{k}-chunk.patch'
+        if chunk_patch.exists() and not force:
+            raise ValueError('Патч chunk уже существует')
+        write_bytes_text(chunk_patch, chunk_diff)
+        record['chunk_diff'] = {'path': chunk_patch.name, 'sha256': sha256(chunk_diff),
+                                'diffstat': diffstat(chunk_diff)}
     evidence.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: record[key] for key in ("diff_empty", "diffstat", "tests_exit", "missing_tool")},
                      ensure_ascii=False))

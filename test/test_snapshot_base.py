@@ -35,8 +35,11 @@ class SnapshotTests(unittest.TestCase):
         self.d.mkdir(parents=True)
         self.plan = self.d / 'plan.md'
         self.plan.write_text(f'- **База:** {self.base}\n- **Вид базы:** snapshot\n\n'
+                             'Покрытие: claim-1.\n'
                              '## files_to_touch\n| Путь | Что делаем |\n|---|---|\n| app.py | правка |\n',
                              encoding='utf-8')
+        (self.d / 'intent.md').write_text('**Контур:** мелкий\n| claim-1 | Ответ | Проверить ответ |\n', encoding='utf-8')
+        (self.d / 'readiness.md').write_text('**Вердикт прогона 1:** готова\n**Вердикт прогона 2:** готова\n', encoding='utf-8')
         (self.root / '.sdlc/gates.md').write_text('| Тесты | да | этап 6 | `git --version` |', encoding='utf-8')
 
     def git(self, *args, cwd=None):

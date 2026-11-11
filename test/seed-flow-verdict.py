@@ -93,7 +93,8 @@ def main() -> int:
     survivors, killed = [], []
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        shutil.copy(TOOL_DIR / "sdlc-constants.json", tmp / "sdlc-constants.json")
+        # Мутант должен исполнять проверки, а не падать на отсутствующем импорте.
+        shutil.copytree(TOOL_DIR, tmp, dirs_exist_ok=True)
         for i in range(total):
             mut = Negate(i)
             mtree = mut.visit(ast.parse(source))

@@ -28,7 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sdlc_common import (  # noqa: E402  — константы и разбор: один источник на все инструменты
     ACTIONS, AXES, CHUNK_FILES, CHUNK_LINES, CONSTANTS, DEFAULT_BUDGET as _DEFAULT_BUDGET,
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
-    gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path,
+    gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path, preparation_checks,
+    readiness_verdict, readiness_ok, diffstat,
 )
 import snapshot_base
 import chunk_preconditions
@@ -148,23 +149,6 @@ def action_of(report: str) -> str:
     артефакт может содержать историю, действует свежая запись."""
     vals = ACTION_RE.findall(report or "")
     return vals[-1] if vals else "none"
-
-
-def readiness_verdict(readiness: str, n: int) -> str:
-    """Последнее записанное значение вердикта прогона n (протокол может содержать историю)."""
-    vals = re.findall(rf"\*\*Вердикт прогона {n}:\*\*\s*(.+)", readiness or "")
-    return vals[-1].strip() if vals else ""
-
-
-def readiness_ok(readiness: str, n: int) -> bool:
-    v = readiness_verdict(readiness, n).lower()
-    # нормализация оформления: болд/код и лишние пробелы не должны прятать отрицание
-    # («**не** готова», «не  готова» — это отказ, а не «готова»)
-    v = re.sub(r"[*_`]", "", v)
-    v = re.sub(r"\s+", " ", v)
-    # граница слова: «✅ готова» — ок; «неготова» (слитно), «не готова…» и заготовка
-    # «готова / не готова — ‹…›» — нет
-    return bool(re.search(r"(?<!\w)готова", v)) and "не готова" not in v
 
 
 def journal_chunk_num(p: Path):
@@ -346,26 +330,29 @@ def do_metrics(root: Path) -> int:
         reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
         j = read(journals[-1]) if journals else None
         nums = attempt_nums(j) if j else []
-        first_pass = next(
-            (k for k, p in enumerate(reports, 1)
-             if re.search(r"\*\*passed:\*\*\s*true", read(p) or "")), None)
+        first_pass = next((index for index, report in enumerate(reports, 1)
+                           if confirmed_verify(d, report)), None)
+        textual = any(re.search(r'\*\*passed:\*\*\s*true', read(p) or '') for p in reports)
         ho = read(d / "handoff.md")
         classes = {c.strip() for c in re.findall(r"^-\s*\*\*Класс:\*\*\s*(.+)", ho or "", re.M)
                    if c.strip().strip('*`_').strip().casefold() not in {'н/п', 'нет', 'не применимо', 'none', 'n/a', '-'}}
         rows.append(dict(
             slug=d.name, attempts=len(nums), reports=len(reports),
             budget=budget_of(j) if j else "-", passed_at=first_pass,
-            handoff=ho is not None, classes=classes,
+            handoff=ho is not None, classes=classes, unconfirmed=textual and first_pass is None,
+            first=bool(reports) and reports[0].name == 'verification-report-1-attempt-1.md'
+                  and first_pass == 1 and first_verify_succeeded(d, reports[0]),
         ))
     if not rows:
         print("витков в .sdlc/ не найдено")
         return 0
     done = [r for r in rows if r["handoff"]]
-    first = [r for r in rows if r["passed_at"] == 1]
+    first = [r for r in rows if r['first']]
     reached = [r for r in rows if r["passed_at"] is not None]
     print(f"Витков: {len(rows)} · завершённых handoff'ом: {len(done)}")
-    print(f"Прошли verify с первой попытки: {len(first)}/{len(rows)}")
-    print(f"Дошли до passed=true вообще: {len(reached)}/{len(rows)}")
+    print(f"Подтверждённый verify с первой попытки: {len(first)}/{len(rows)}")
+    print(f"Подтверждённый успешный verify: {len(reached)}/{len(rows)}")
+    print(f"Текстовый passed=true без подтверждения: {sum(r['unconfirmed'] for r in rows)}/{len(rows)}")
     over = [r for r in rows if str(r["budget"]).isdigit() and r["attempts"] > int(r["budget"])]
     print(f"Превысили бюджет попыток: {len(over)}/{len(rows)}"
           f" ({', '.join(r['slug'] for r in over) or 'нет'})")
@@ -380,6 +367,144 @@ def do_metrics(root: Path) -> int:
         print(f"  ПОВТОР «{c}» — {', '.join(v)} → SDLC.md → «Когда дефект проскочил»: "
               f"править систему, не случай")
     return 0
+
+
+def verify_receipt(d, report, result):
+    """Сохрани каждый машинный результат. Не исправляй прежний отказ новой записью."""
+    match = re.fullmatch(r'verification-report-(\d+)-attempt-(\d+)\.md', report.name)
+    n, k = map(int, match.groups())
+    prefix = f'verify-result-{n}-attempt-{k}-run-'
+    number = max((int(p.stem[len(prefix):]) for p in d.glob(prefix + '*.json')
+                  if p.stem[len(prefix):].isdigit()), default=0) + 1
+    record = {'version': 1, 'tool': 'flow-verdict.py', 'at': 'verify', 'slug': d.name,
+              'chunk': n, 'attempt': k, 'report': report.name,
+              'report_sha256': snapshot_base.digest(report.read_bytes()), 'exit_code': result,
+              'passed': result == 0 and bool(re.search(r'\*\*passed:\*\*\s*true\b', read(report) or ''))}
+    with (d / f'{prefix}{number}.json').open('x', encoding='utf-8') as output:
+        json.dump(record, output, ensure_ascii=False, indent=2)
+
+
+def confirmed_verify(d, report):
+    match = re.fullmatch(r'verification-report-(\d+)-attempt-(\d+)\.md', report.name)
+    n, k = map(int, match.groups())
+    receipts = natsorted(d.glob(f'verify-result-{n}-attempt-{k}-run-*.json'))
+    if not receipts:
+        return False
+    try:
+        rec = json.loads(receipts[-1].read_bytes())
+        return verify_receipt_matches(rec, d, report)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+def verify_receipt_matches(rec, d, report):
+    n, k = map(int, re.findall(r'\d+', report.name))
+    return (rec.get('version') == 1 and rec.get('tool') == 'flow-verdict.py'
+            and rec.get('at') == 'verify' and rec.get('slug') == d.name
+            and rec.get('chunk') == n and rec.get('attempt') == k and rec.get('report') == report.name
+            and rec.get('report_sha256') == snapshot_base.digest(report.read_bytes())
+            and rec.get('exit_code') == 0 and rec.get('passed') is True
+            and bool(re.search(r'\*\*passed:\*\*\s*true\b', read(report) or '')))
+
+
+def first_verify_succeeded(d, report):
+    receipts = natsorted(d.glob('verify-result-1-attempt-1-run-*.json'))
+    if not receipts or not confirmed_verify(d, report):
+        return False
+    try:
+        rec = json.loads(receipts[0].read_bytes())
+        return verify_receipt_matches(rec, d, report)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+def defect_record_errors(d, handoff):
+    """Не превращай любой failed-отчёт в дефект. Требуй подтверждённую находку или явную запись."""
+    required, history_errors = set(), []
+    for validation in d.glob('.review-validation-*-attempt-*.json'):
+        try:
+            n, k = map(int, re.findall(r'\d+', validation.name))
+            rec = json.loads(validation.read_bytes())
+            review_path = d / f'chunk-{n}-attempt-{k}-review.md'
+            patch_path = d / f'chunk-{n}-attempt-{k}-diff.patch'
+            if (rec.get('version') != 1 or rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
+                    or rec.get('chunk') != n or rec.get('attempt') != k
+                    or rec.get('review_sha256') != snapshot_base.digest(review_path.read_bytes())
+                    or rec.get('patch_sha256') != snapshot_base.digest(patch_path.read_bytes())):
+                raise ValueError('Хэши или область подтверждённого ревью изменены')
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            history_errors.append(f'История подтверждённого ревью повреждена: {validation.name}: {error}')
+    for path in d.glob('chunk-*-attempt-*-review.md'):
+        text = read(path) or ''
+        match = re.search(r'```json\s*\n(.*?)\n```', text, re.S)
+        try:
+            review = json.loads(match.group(1) if match else text)
+        except ValueError:
+            continue
+        if not isinstance(review, dict):
+            continue
+        findings = review.get('findings')
+        if not isinstance(findings, list) or not isinstance(review.get('claims'), list):
+            continue
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('defect_review', Path(__file__).with_name('review-validate.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        patch = path.with_name(path.name.replace('-review.md', '-diff.patch'))
+        if not patch.is_file():
+            continue
+        artifact_paths = module.artifact_aliases(d.name)
+        try:
+            n, k = map(int, re.findall(r'\d+', path.name))
+            validation = d / f'.review-validation-{n}-attempt-{k}.json'
+            primary_paths = set()
+            archived_intent = d / f'.chunk-{n}-intent.md'
+            claim_ids = claims_in(read(archived_intent if archived_intent.exists() else d / 'intent.md') or '')
+            if validation.exists():
+                rec = json.loads(validation.read_bytes())
+                if (rec.get('version') != 1 or rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
+                        or rec.get('chunk') != n or rec.get('attempt') != k
+                        or rec.get('review_sha256') != snapshot_base.digest(path.read_bytes())
+                        or rec.get('patch_sha256') != snapshot_base.digest(patch.read_bytes())):
+                    continue
+                claim_ids = set(rec['claim_ids'])
+                primary_paths = set(rec['primary_paths'])
+            errors, _ = module.validate(review, claim_ids,
+                                         set(diffstat(patch.read_bytes().decode('utf-8', errors='surrogateescape'))['paths']),
+                                         primary_paths=primary_paths, artifact_paths=artifact_paths)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            continue
+        if errors:
+            continue
+        for finding in findings:
+            if (isinstance(finding, dict) and finding.get('summary')
+                    and (finding.get('kind') == 'uncovered_behavior'
+                         or finding.get('kind') == 'mismatch' and review.get('claims')
+                         and all(c.get('status') == 'passed' for c in review['claims']))):
+                required.add(f'{path.name}#{snapshot_base.digest(finding["summary"].encode("utf-8"))[:16]}')
+    for report in d.glob('verification-report-*-attempt-*.md'):
+        required.update(re.findall(r'^- \*\*Проскочивший дефект:\*\*\s*(\S+)', read(report) or '', re.M))
+    blocks = re.split(r'(?=^- \*\*Имя:\*\*)', handoff or '', flags=re.M)[1:]
+    errors, covered = list(history_errors), set()
+    fields = ('Имя', 'Класс', 'Повтор', 'Что проскочило',
+              'Какой гейт должен был поймать и почему не поймал', 'Действие', 'Кто утвердил',
+              'Где реализовано', 'Чем закреплено')
+    for block in blocks:
+        values = {name: (re.search(rf'^- \*\*{re.escape(name)}:\*\*[^\S\n]*([^\n]*)', block, re.M)
+                         or [None, ''])[1].strip() for name in fields}
+        if values['Имя'] in ('нет', 'н/п', ''):
+            continue
+        for name, value in values.items():
+            if (not value or '‹' in value or 'не утверждено' in value
+                    or value == 'н/п' and name != 'Повтор'):
+                errors.append(f'Запись «{values["Имя"]}»: не заполнено поле «{name}»')
+        if values['Действие'] not in ('конструкция', 'проверка', 'принятие риска'):
+            errors.append('Запись о дефекте требует одно допустимое действие')
+        covered.update(re.findall(r'^- \*\*Источник дефекта:\*\*\s*(\S+)', block, re.M))
+    missing = required - covered
+    if missing:
+        errors.append('Нет обязательных записей о дефектах: ' + ', '.join(sorted(missing)))
+    return errors
 
 
 # ---------------------------------------------------------------- вердикт
@@ -448,6 +573,12 @@ def state_verdict(root, slug, at):
         for name in MANDATORY_FALLBACK:
             if name not in enabled:
                 errors.append(f"нет обязательного гейта: {name}")
+        if at == 'handoff':
+            d = root / '.sdlc' / slug
+            errors.extend(defect_record_errors(d, read(d / 'handoff.md') or ''))
+            if (d / 'git-operation.json').exists():
+                import git_operation
+                errors.extend(git_operation.completion_errors(root, d))
         print(f"# Вердикт state-first: {slug} (--at {at})")
         for error in errors:
             print(f"❌ {error}")
@@ -459,7 +590,7 @@ def state_verdict(root, slug, at):
         return 1
 
 
-def main(root: Path, slug: str, at: str = "handoff") -> int:
+def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     canonical = state_verdict(root, slug, at)
     if canonical is not None:
         return canonical
@@ -526,6 +657,14 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                 f"строка «Одобрение»: {approval_line(plan).strip()[:70] or 'отсутствует'}",
                 "одобрение живёт в чате или план явно не одобрен — чинить /sdlc-plan Phase 5")
     if handoff and full:
+        if (d / 'git-operation.json').exists():
+            import git_operation
+            operation_errors = git_operation.completion_errors(root, d)
+            v.check(not operation_errors, 'результат Git-операции проверен', '; '.join(operation_errors),
+                    'выполни postcheck; ошибка оставляет задачу открытой с процедурой исправления')
+        defects = defect_record_errors(d, handoff)
+        v.check(not defects, 'обязательные записи о дефектах завершены', '; '.join(defects),
+                'запиши подтверждённую находку, действие, утверждение и закрепляющую проверку')
         # handoff дописывается новой секцией на каждый виток той же задачи (SDLC.md → «Раскладка
         # артефактов»): действует ПОСЛЕДНЯЯ запись «Приёмка», а не первая попавшаяся — иначе
         # приёмка прошлого витка засчитывалась бы новому (у которого поля может не быть вовсе)
@@ -550,13 +689,6 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
             problems = chunk_preconditions.errors(root, d, n, historical=int(n) < current_chunk)
             v.check(not problems, f'предусловия chunk-{n} подтверждены квитанцией', '; '.join(problems),
                     'выполни prepare до правок; позднее отклонение сохрани явно, не объявляй порядок доказанным')
-    if readiness:
-        for n in (1, 2):
-            ok_val = readiness_ok(readiness, n)
-            v.check(ok_val, f"readiness: прогон {n} — «готова»",
-                    f"вердикт: {readiness_verdict(readiness, n)[:50] or 'отсутствует'}",
-                    "виток идёт с непринятой готовностью — чинить предусловия этапов 2/4")
-
     # --- 4. Попытки: нумерация цела — по каждому chunk'у ---------------------------------------
     for p in journals:
         j = texts.get(p.name) or ""
@@ -590,32 +722,14 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
 
     # --- 5. Claims сквозные + структура листа --------------------------------------------------
     if intent and plan and last_report:
-        ci, cp, cr = claims_in(intent), claims_in(plan), claims_in(last_report)
-        v.check(ci == cp, "claims intent == plan",
-                f"intent {sorted(ci - cp)} vs plan {sorted(cp - ci)}",
-                "план потерял или выдумал пункты")
+        ci, cr = claims_in(intent), claims_in(last_report)
         v.check(ci == cr, "claims intent == verification",
                 f"разница: {sorted(ci ^ cr)}",
                 "отчёт приёмки не покрывает лист 1:1")
-    if intent:
-        # [^|]* после id: строка листа несёт тег в той же ячейке — «| claim-5 [edge] | …» —
-        # Жёсткое \s*\| после id пропускает строку с тегом в той же ячейке.
-        rows = [ln for ln in intent.splitlines() if re.match(r"^\|\s*claim-\d+\b[^|]*\|", ln)]
-        # позиционно: | id | Пункт | Как проверить | … — пустая третья колонка не компенсируется
-        # заполненной четвёртой (опциональной GWT-колонкой)
-        cells = [[c.strip() for c in r.split("|")] for r in rows]
-        cells_ok = all(len(c) > 3 and c[2] and c[3] for c in cells)
-        small = chunk_preconditions.contour(intent) == 'мелкий'
-        edge = sum("[edge]" in r for r in rows)
-        v.check(bool(rows), "в листе есть строки claim-N", "таблица листа пуста или не по форме",
-                "лист не в канонической форме — сверки слепнут")
-        v.check(cells_ok, "у каждого claim заполнено «Как проверить»",
-                "есть строка листа без процедуры проверки",
-                "структура листа сломана правкой после прогона 1")
-        if not small:
-            v.check(len(rows) >= 3 and edge >= 2, "полный контур: ≥3 пунктов, ≥2 [edge]",
-                    f"пунктов {len(rows)}, [edge] {edge}",
-                    "правка листа после прогона 1 уронила структуру ниже минимума")
+    if intent and plan and readiness:
+        for ok, name, detail in preparation_checks(intent, plan, readiness,
+                                                  chunk_preconditions.contour(intent) == 'мелкий'):
+            v.check(ok, name, detail, 'исправь форму до prepare; сохрани прежние отказы')
 
     # --- 6. Гейты: минимум включён; включённые «этап 6» имеют строку в отчёте -------------------
     if gates:
@@ -787,14 +901,28 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
                     f'квитанция {ev.name} сохранена до попытки', '; '.join(problems) or 'квитанция не закреплена в evidence',
                     'не создавай свидетельство готовности задним числом')
         if m:
-            by_chunk.setdefault(int(m.group(1)), {})[int(m.group(2))] = rec.get("diffstat") or {}
+            stat = rec.get('diffstat') or {}
+            chunk_diff = rec.get('chunk_diff')
+            if chunk_diff:
+                try:
+                    raw = chunk_preconditions.artifact(d, chunk_diff['path']).read_bytes()
+                    if (chunk_diff['path'] != f'chunk-{m.group(1)}-attempt-{m.group(2)}-chunk.patch'
+                            or snapshot_base.digest(raw) != chunk_diff['sha256']):
+                        raise ValueError('Патч chunk изменён')
+                    stat = diffstat(raw.decode('utf-8', errors='surrogateescape'))
+                    if stat != chunk_diff['diffstat']:
+                        raise ValueError('Размер chunk не совпадает с патчем')
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    v.fail(f'размер {ev.name} подтверждён', str(error), 'восстанови свидетельства; не переписывай историю')
+            by_chunk.setdefault(int(m.group(1)), {})[int(m.group(2))] = (stat, bool(chunk_diff))
     explained = bool(re.search(r"почему этот chunk больше ориентира", plan or "", re.I))
     prev_lines, prev_files = 0, 0
     for cn in sorted(by_chunk):
-        stat = by_chunk[cn][max(by_chunk[cn])]
+        stat, measured = by_chunk[cn][max(by_chunk[cn])]
         total_lines = int(stat.get("added", 0)) + int(stat.get("deleted", 0))
         total_files = int(stat.get("files", 0))
-        lines, files = max(0, total_lines - prev_lines), max(0, total_files - prev_files)
+        lines, files = ((total_lines, total_files) if measured else
+                        (max(0, total_lines - prev_lines), max(0, total_files - prev_files)))
         prev_lines, prev_files = total_lines, total_files
         over = lines > CHUNK_LINES or files > CHUNK_FILES
         v.check(not over or explained,
@@ -817,6 +945,15 @@ def main(root: Path, slug: str, at: str = "handoff") -> int:
     for c in v.passed:
         print(f"- ✅ {c}")
     return 1 if v.failed else 0
+
+
+def main(root: Path, slug: str, at: str = 'handoff') -> int:
+    result = check_flow(root, slug, at)
+    d = root / '.sdlc' / slug
+    reports = natsorted(d.glob('verification-report-*-attempt-*.md'))
+    if at == 'verify' and reports and not (d / 'state.json').exists() and not (d / 'state.json').is_symlink():
+        verify_receipt(d, reports[-1], result)
+    return result
 
 
 if __name__ == "__main__":

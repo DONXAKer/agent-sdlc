@@ -52,10 +52,11 @@ def run_case(case_dir: Path) -> str:
         meta = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
     mode = meta.get("mode", "verify")
     slug = meta.get("slug", case_dir.name)
-    root, tmp = case_dir, None
+    tmp = tempfile.TemporaryDirectory()
+    root = Path(tmp.name)
+    if 'source' not in meta:
+        shutil.copytree(case_dir, root, dirs_exist_ok=True)
     if "source" in meta:
-        tmp = tempfile.TemporaryDirectory()
-        root = Path(tmp.name)
         src = (case_dir / meta["source"]).resolve()
         (root / ".sdlc" / slug).mkdir(parents=True)
         for f in src.iterdir():

@@ -19,7 +19,10 @@
     "implementations/claude-code/skills/sdlc-verify/tools/gates/tests_claims.py",
     "implementations/claude-code/skills/sdlc-verify/tools/gates/untracked.py",
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json",
-    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json"
+    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
+    "implementations/claude-code/skills/sdlc-verify/tools/review_evidence.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/git_operation.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
   ],
   "codex": [
     "implementations/codex/skills/sdlc-verify/tools/chunk_preconditions.py",
@@ -72,7 +75,10 @@
     "implementations/codex/skills/sdlc-verify/tools/state_contract.py",
     "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json",
     "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
-    "implementations/codex/test_package.py"
+    "implementations/codex/test_package.py",
+    "implementations/codex/skills/sdlc-verify/tools/review_evidence.py",
+    "implementations/codex/skills/sdlc-verify/tools/git_operation.py",
+    "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
   ],
   "kimi-code": [
     "implementations/kimi-code/README.md",
@@ -124,7 +130,10 @@
     "implementations/kimi-code/skills/sdlc-verify/tools/state_contract.py",
     "implementations/kimi-code/skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json",
     "implementations/kimi-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
-    "implementations/kimi-code/test_package.py"
+    "implementations/kimi-code/test_package.py",
+    "implementations/kimi-code/skills/sdlc-verify/tools/review_evidence.py",
+    "implementations/kimi-code/skills/sdlc-verify/tools/git_operation.py",
+    "implementations/kimi-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
   ],
   "claude-code": [
     "implementations/claude-code/skills/sdlc-verify/tools/chunk_preconditions.py",
@@ -173,7 +182,10 @@
     "implementations/claude-code/skills/sdlc-verify/tools/sdlc_common.py",
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract.py",
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json",
-    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json"
+    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
+    "implementations/claude-code/skills/sdlc-verify/tools/review_evidence.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/git_operation.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
   ],
   "opencode": [
     "implementations/opencode/README.md",
@@ -233,6 +245,9 @@
     "implementations/opencode/commands/sdlc-verify.md",
     "implementations/opencode/commands/sdlc-handoff.md",
     "implementations/opencode/commands/sdlc-retro.md",
-    "implementations/opencode/commands/sdlc-seed.md"
+    "implementations/opencode/commands/sdlc-seed.md",
+    "implementations/opencode/skills/sdlc-verify/tools/review_evidence.py",
+    "implementations/opencode/skills/sdlc-verify/tools/git_operation.py",
+    "implementations/opencode/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
   ]
 }

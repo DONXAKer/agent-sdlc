@@ -28,7 +28,7 @@ def kind_of(plan):
     return kind
 
 
-def project_files(root, known_paths=()):
+def project_files(root, known_paths=(), git_special=False):
     rc, out, err = git_run(['ls-files', '-z', '--cached', '--others', '--exclude-standard'], root)
     if rc:
         raise ValueError(f'Не удалось получить файлы дерева: {err}')
@@ -36,7 +36,32 @@ def project_files(root, known_paths=()):
     for name in sorted((set(out.split('\0')) | set(known_paths)) - {''}):
         if name.startswith(ARTIFACTS_DIR + '/') or is_junk_path(name):
             continue
+        candidate = root / name
+        if git_special and candidate.is_symlink():
+            safe_path(root, str(Path(name).parent).replace('\\', '/'))
+            result[name] = (os.readlink(candidate).encode('utf-8', errors='surrogateescape'), 0o120000)
+            continue
         path = safe_path(root, name)
+        if git_special and path.is_dir():
+            rc, index, err = git_run(['ls-files', '--stage', '--', name], root)
+            match = re.match(r'160000 ([0-9a-f]+) 0\t', index)
+            if rc or not match:
+                raise ValueError(f'Не удалось прочитать gitlink: {name}')
+            rc, directory, _ = git_run(['-C', str(path), 'rev-parse', '--show-toplevel'], root)
+            initialized = rc == 0 and Path(directory.strip()).resolve() == path.resolve()
+            oid = match.group(1)
+            dirty = ''
+            if initialized:
+                rc, output, err = git_run(['-C', str(path), 'rev-parse', 'HEAD'], root)
+                if rc:
+                    raise ValueError(f'Не удалось прочитать submodule: {name}')
+                oid = output.strip()
+                rc, output, err = git_run(['-C', str(path), 'status', '--porcelain'], root)
+                if rc:
+                    raise ValueError(f'Не удалось проверить submodule: {name}')
+                dirty = '-dirty' if output.strip() else ''
+            result[name] = (f'Subproject commit {oid}{dirty}\n'.encode('ascii'), 0o160000)
+            continue
         if path.is_symlink() or any(p.is_symlink() for p in path.parents if p != root and p.is_relative_to(root)):
             raise ValueError(f'Снимок не поддерживает символьные ссылки: {name}')
         if path.is_dir():
@@ -46,12 +71,13 @@ def project_files(root, known_paths=()):
     return result
 
 
-def safe_path(root, name):
+def safe_path(root, name, follow=True):
     parts = PurePosixPath(name)
     if not name or parts.is_absolute() or '..' in parts.parts or '\\' in name or ':' in name or '.git' in parts.parts:
         raise ValueError(f'Недопустимый путь снимка: {name}')
     target = root / name
-    if not target.resolve().is_relative_to(root.resolve()):
+    resolved = target.resolve() if follow else target.parent.resolve() / target.name
+    if not resolved.is_relative_to(root.resolve()):
         raise ValueError(f'Путь снимка выходит за корень: {name}')
     return target
 
@@ -118,13 +144,13 @@ def materialize(files, destination):
         path = safe_path(destination, name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-        path.chmod(mode)
+        path.chmod(mode if mode in (0o644, 0o755) else 0o644)
 
 
-def snapshot_diff(root, files):
+def snapshot_diff(root, files, current_files=None, git_special=False):
     """Сравни сырые байты через отдельный Git index без фильтров рабочего проекта."""
     # Новое правило ignore не удаляет ранее сохранённый файл из сравнения.
-    current = project_files(root, files)
+    current = project_files(root, files, git_special=git_special) if current_files is None else current_files
     # Чтение и проверка полной базы остаются в load. Сокращаем только временную запись.
     changed = {name for name in files.keys() | current.keys() if files.get(name) != current.get(name)}
     before_files = {name: files[name] for name in changed if name in files}
@@ -148,7 +174,8 @@ def snapshot_diff(root, files):
                 if not target.exists():
                     target.parent.mkdir(exist_ok=True)
                     target.write_bytes(zlib.compress(raw))
-                entries.append(f'100{mode:o} {oid}\t'.encode('ascii') + name.encode('utf-8', errors='surrogateescape') + b'\0')
+                git_mode = f'100{mode:o}' if mode in (0o644, 0o755) else f'{mode:o}'
+                entries.append(f'{git_mode} {oid}\t'.encode('ascii') + name.encode('utf-8', errors='surrogateescape') + b'\0')
             git('read-tree', '--empty')
             git('update-index', '-z', '--index-info', input=b''.join(entries))
             return git('write-tree').strip()

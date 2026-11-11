@@ -73,7 +73,7 @@ def generated(root):
     desired[tools / 'sdlc-constants.json'] = canonical_bytes(root / 'sdlc-constants.json')
     contract = Path('implementations/runner-contract')
     desired[tools / 'state_contract.py'] = canonical_bytes(root / contract / 'tools/state_contract.py')
-    for name in ('agent-sdlc-state-v1.schema.json', 'verify-review-v1.schema.json'):
+    for name in ('agent-sdlc-state-v1.schema.json', 'verify-review-v1.schema.json', 'review-evidence-v1.schema.json'):
         desired[tools / 'state_contract/schemas' / name] = canonical_bytes(root / contract / 'schemas' / name)
     # Инструменты Claude Code остаются первоисточником общей реализации.
     tool_files = selected_files(root, inventory(root)['shared_tools'], desired)

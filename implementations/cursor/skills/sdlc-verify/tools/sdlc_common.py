@@ -59,6 +59,39 @@ def claims_in(text) -> set:
     return set(CLAIM_RE.findall(text or ""))
 
 
+def readiness_verdict(readiness, n):
+    values = re.findall(rf'\*\*Вердикт прогона {n}:\*\*[^\S\n]*([^\n]+)', readiness or '')
+    return values[-1].strip() if values else ''
+
+
+def readiness_ok(readiness, n):
+    value = re.sub(r'\s+', ' ', re.sub(r'[*_`]', '', readiness_verdict(readiness, n).lower()))
+    return bool(re.search(r'(?<!\w)готова', value)) and 'не готова' not in value
+
+
+def preparation_checks(intent, plan, readiness, small=False):
+    """Один контракт формы и mapping для раннего и итогового этапов."""
+    rows = [line for line in (intent or '').splitlines() if re.match(r'^\|\s*claim-\d+\b[^|]*\|', line)]
+    cells = [[cell.strip() for cell in row.split('|')] for row in rows]
+    ci, cp = claims_in(intent), claims_in(plan)
+    checks = [
+        (ci == cp and bool(ci), 'claims intent == plan',
+         f'пропущены: {sorted(ci - cp)}; неизвестны: {sorted(cp - ci)}'),
+        (bool(rows), 'в листе есть строки claim-N', 'таблица листа пуста или не по форме'),
+        (all(len(c) > 3 and c[2] and c[3] for c in cells),
+         'у каждого claim заполнено «Как проверить»', 'есть строка листа без процедуры проверки'),
+        (set().union(*(claims_in(row.split("|")[1]) for row in rows)) == ci if rows else False,
+         'все claim-ID заданы строками таблицы', 'claim-ID вне канонической таблицы'),
+    ]
+    if not small:
+        checks.append((len(rows) >= 3 and sum('[edge]' in row for row in rows) >= 2,
+                       'полный контур: ≥3 пунктов, ≥2 [edge]', 'недостаточно строк или граничных случаев'))
+    for n in (1, 2):
+        checks.append((readiness_ok(readiness, n), f'readiness: прогон {n} — «готова»',
+                       f'вердикт: {readiness_verdict(readiness, n) or "отсутствует"}'))
+    return checks
+
+
 def sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="surrogateescape")).hexdigest()
 

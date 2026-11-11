@@ -26,6 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sdlc_common import ARTIFACTS_DIR, claims_in, diffstat, read  # noqa: E402
+import review_evidence
+import snapshot_base
 
 SCHEMA_VERSION = "agent-sdlc/verify-review/v1"
 STATUSES = {"passed", "failed", "uncertain", "manual"}
@@ -33,6 +35,10 @@ KINDS = {"findings": {"mismatch", "uncovered_behavior"}, "scope": {"scope"},
          "invariants": {"invariant"}, "regressions": {"regression"}}
 ARTIFACT_PATHS = {"intent.md", "plan.md", "gates.md"}
 GLYPH_STATUS = {"✅": "passed", "❌": "failed", "⚠": "uncertain"}
+
+
+def artifact_aliases(slug):
+    return {f'{ARTIFACTS_DIR}/{slug}/intent.md', f'{ARTIFACTS_DIR}/{slug}/plan.md', f'{ARTIFACTS_DIR}/gates.md'}
 
 
 def extract_json(text: str):
@@ -64,8 +70,10 @@ def refs_of(item, where, paths, errors):
     return ok, any_patch
 
 
-def validate(review, intent_claims: set, paths: set):
+def validate(review, intent_claims: set, paths: set, primary_paths=None, artifact_paths=None):
     errors, statuses = [], {}
+    primary_paths = set(primary_paths or ())
+    artifact_paths = ARTIFACT_PATHS | set(artifact_paths or ())
     if not isinstance(review, dict):
         return ["ответ не объект"], {}
     if review.get("schema_version") not in (None, SCHEMA_VERSION):
@@ -89,6 +97,9 @@ def validate(review, intent_claims: set, paths: set):
             errors.append(f"{cid}: статус «{st}» вне {sorted(STATUSES)}")
         statuses[cid] = st
         refs, hit = refs_of(c, f"{cid}", paths, errors)
+        for p, _ in refs:
+            if p not in paths | artifact_paths | primary_paths:
+                errors.append(f'{cid}: незакреплённое доказательство «{p}»')
         any_patch_ref = any_patch_ref or hit
         if st in ("passed", "failed") and not refs:
             errors.append(f"{cid}: статус {st} без единой ссылки evidence")
@@ -123,8 +134,10 @@ def validate(review, intent_claims: set, paths: set):
             if not refs:
                 errors.append(f"{where} «{(summary or '')[:40]}»: без evidence")
             for p, _ in refs:
-                if p not in paths and Path(p).name not in ARTIFACT_PATHS:
+                if p not in paths | artifact_paths | primary_paths:
                     errors.append(f"{where}: ссылается на «{p}», которого нет ни в патче, ни среди артефактов")
+            if refs and not any(p in paths | artifact_paths for p, _ in refs):
+                errors.append(f'{where}: нет адреса объекта проверки в патче или разрешённом артефакте')
             any_patch_ref = any_patch_ref or hit
     if not any_patch_ref and paths:
         errors.append("ни одна ссылка ответа не называет путь из патча — разбор неотличим от пересказа")
@@ -154,7 +167,22 @@ def main() -> int:
         print(json.dumps({"valid": False, "errors": [err], "claims": {}}, ensure_ascii=False))
         return 1
     try:
-        errors, statuses = validate(review, intent_claims, paths)
+        primary_paths = review_evidence.verify(root, d, n, k)
+        artifacts = artifact_aliases(slug)
+        errors, statuses = validate(review, intent_claims, paths, primary_paths, artifacts)
+        if not errors:
+            record = {'version': 1, 'tool': 'review-validate.py', 'slug': slug,
+                      'chunk': int(n), 'attempt': int(k), 'claim_ids': sorted(intent_claims),
+                      'review_sha256': snapshot_base.digest(answer.read_bytes()),
+                      'patch_sha256': snapshot_base.digest(patch.read_bytes()),
+                      'primary_paths': sorted(primary_paths)}
+            receipt = d / f'.review-validation-{n}-attempt-{k}.json'
+            if receipt.exists():
+                if json.loads(receipt.read_bytes()) != record:
+                    raise ValueError('Квитанция ревью уже существует с другими входами')
+            else:
+                with receipt.open('x', encoding='utf-8') as output:
+                    json.dump(record, output, ensure_ascii=False, indent=2)
     except Exception as e:  # структура вне ожиданий — ошибка в списке, не traceback
         errors, statuses = [f"структура ответа не разбирается: {type(e).__name__}: {e}"], {}
     print(json.dumps({"valid": not errors, "errors": errors, "claims": statuses,

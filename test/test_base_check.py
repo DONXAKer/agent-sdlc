@@ -24,6 +24,15 @@ def tests_file(*bodies):
 
 
 class BaseCheckTests(unittest.TestCase):
+    def test_context_is_passed_to_base_command(self):
+        self.tests_cmd = f'"{PY}" -c "import os; assert os.environ.get(\'TASK\') == \'B-1\'; assert os.environ.get(\'LAYER\') == \'unit\'"'
+        (self.root / '.sdlc/gate-context.json').write_text(json.dumps({
+            'version': 1, 'commands': [{'command': self.tests_cmd, 'inputs': {
+                'TASK': 'slug', 'LAYER': 'layer', 'PYTHONDONTWRITEBYTECODE': 'layer'}}]}), encoding='utf-8')
+        self.snapshot()
+        code, result, _, output = self.run_tool('--tests-cmd', self.tests_cmd, '--layer', 'unit')
+        self.assertIn('"base_exit": 0', output)
+
     def test_bad_quotes_return_gate_result_without_traceback(self):
         (self.root / 'app.py').write_text('def add(a, b):\n    return a + b\n', encoding='utf-8')
         self.snapshot()

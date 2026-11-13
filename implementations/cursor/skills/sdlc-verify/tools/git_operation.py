@@ -14,7 +14,7 @@ from pathlib import Path
 
 import snapshot_base
 import review_evidence
-from sdlc_common import claims_in, enabled_gates, git_out, git_run, is_junk_path, files_to_touch
+from sdlc_common import claims_in, enabled_gates, git_out, git_run, is_junk_path, files_to_touch, artifact_targets, artifact_observed
 
 KINDS = {'commit', 'parents', 'ancestry', 'paths'}
 
@@ -34,7 +34,8 @@ def tree_record(root, mode, oid):
     return {'sha256': snapshot_base.digest(content.encode('utf-8', errors='surrogateescape')), 'mode': int(mode, 8)}
 
 
-def indexed_tree(root):
+def indexed_tree(root, d=None):
+    targets = artifact_targets(root, d) if d else []
     result = {}
     rc, output, error = git_run(['ls-files', '--stage', '-z'], root)
     if rc:
@@ -46,12 +47,13 @@ def indexed_tree(root):
         mode, oid, stage = info.split()
         if stage != '0':
             raise ValueError('Index содержит незавершённое слияние')
-        if not name.startswith('.sdlc/') and not is_junk_path(name):
+        if (not name.startswith('.sdlc/') or artifact_observed(name, targets, d)) and not is_junk_path(name):
             result[name] = tree_record(root, mode, oid)
     return result
 
 
-def committed_tree(root, head):
+def committed_tree(root, head, d=None):
+    targets = artifact_targets(root, d) if d else []
     tree = {}
     rc, output, error = git_run(['ls-tree', '-r', '-z', '--full-tree', head], root)
     if rc:
@@ -61,7 +63,7 @@ def committed_tree(root, head):
             continue
         info, name = entry.split('\t', 1)
         mode, kind, oid = info.split()
-        if name.startswith('.sdlc/') or is_junk_path(name):
+        if (name.startswith('.sdlc/') and not artifact_observed(name, targets, d)) or is_junk_path(name):
             continue
         if kind not in ('blob', 'commit'):
             raise ValueError('Недопустимый объект результата Git-операции')
@@ -125,8 +127,8 @@ def prepare(root, d, n, k):
     evidence = importlib.util.module_from_spec(spec_evidence)
     spec_evidence.loader.exec_module(evidence)
     base, snapshot = snapshot_base.load(root, d)
-    current = (evidence.regenerate_diff(root, base['id']) if snapshot is None else
-               snapshot_base.snapshot_diff(root, snapshot))
+    current = (evidence.regenerate_diff(root, base['id'], d=d) if snapshot is None else
+               snapshot_base.snapshot_diff(root, snapshot, d=d))
     if snapshot_base.digest(current.encode('utf-8', errors='surrogateescape')) != snapshot_base.digest(patch.read_bytes()):
         raise ValueError('Дерево кандидата отличается от проверенного патча')
     from sdlc_common import diffstat
@@ -147,7 +149,7 @@ def prepare(root, d, n, k):
            'inputs': {path.name: snapshot_base.digest(path.read_bytes()) for path in
                       (report, review_path, patch, d / 'intent.md', d / 'plan.md', d.parent / 'gates.md')},
            'config': config, 'status': 'admitted', 'passed': False}
-    rec['candidate_tree'] = indexed_tree(root)
+    rec['candidate_tree'] = indexed_tree(root, d)
     target = d / 'git-operation-admission.json'
     if target.exists():
         if json_file(target) != rec:
@@ -172,7 +174,7 @@ def postcheck(root, d):
     paths = (git_out(['diff-tree', '--root', '--first-parent', '-m', '--no-commit-id', '--name-only', '-r', head], root) or '').splitlines()
     expected = rec['config'].get('expected', {})
     checks = {'commit': bool(head) and head != rec['head_sha'],
-              'candidate_tree': committed_tree(root, head) == rec['candidate_tree'],
+              'candidate_tree': committed_tree(root, head, d) == rec['candidate_tree'],
               'parents': parents == expected.get('parents'),
               'paths': sorted(paths) == sorted(expected.get('paths', [])),
               'ancestry': all(git_run(['merge-base', '--is-ancestor', sha, head], root)[0] == 0
@@ -200,7 +202,7 @@ def completion_errors(root, d):
                 or rec.get('admission_sha256') != snapshot_base.digest(admission.read_bytes())
                 or rec.get('passed') is not True):
             return ['Git-postcheck не подтверждён; задача остаётся открытой']
-        if committed_tree(root, head) != original.get('candidate_tree'):
+        if committed_tree(root, head, d) != original.get('candidate_tree'):
             return ['Дерево Git-результата отличается от принятого кандидата']
         reports = sorted(d.glob('verification-report-*-attempt-*.md'),
                          key=lambda p: tuple(map(int, re.findall(r'\d+', p.name))))

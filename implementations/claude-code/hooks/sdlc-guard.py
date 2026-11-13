@@ -156,7 +156,7 @@ def hook() -> int:
         if name == ".review-lock":
             if tool in WRITE_TOOLS:
                 target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-                if target and not rel_path(root, target).startswith(ARTIFACTS_DIR + "/"):
+                if target and not rel_path(root, target).startswith(ARTIFACTS_DIR + "/" + d.name + "/"):
                     return deny(f"Этап 6, ревью в {d.name}: инструменты записи вне .sdlc/ на время ревью закрыты "
                                 f"(маркер {d / name}). Снять после ответа рецензента: {unlock}")
             if tool == "Bash" and is_mutating(tool_input.get("command", "") or ""):

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import snapshot_base
-from sdlc_common import files_to_touch, patch_files, read, preparation_checks
+from sdlc_common import files_to_touch, patch_files, read, preparation_checks, artifact_targets
 
 
 def receipt_path(d, n):
@@ -44,6 +44,7 @@ def create(root, d, n, locator, current_diff, capture_baseline):
     if problems:
         raise ValueError('; '.join(problems))
     planned = set(files_to_touch(plan))
+    targets = artifact_targets(root, d)
     if not planned:
         raise ValueError('План не содержит files_to_touch; предусловия не доказаны')
     base, _ = snapshot_base.load(root, d)
@@ -58,7 +59,8 @@ def create(root, d, n, locator, current_diff, capture_baseline):
         if touched & planned:
             raise ValueError('До квитанции уже изменены пути плана; порядок не доказан. Сохрани отклонение в журнале')
     else:
-        previous = list(d.glob(f'chunk-{int(n) - 1}-attempt-*-evidence.json'))
+        previous = [path for path in d.glob(f'chunk-{int(n) - 1}-attempt-*-evidence.json')
+                    if re.fullmatch(rf'chunk-{int(n) - 1}-attempt-\d+-evidence\.json', path.name)]
         if not previous:
             raise ValueError('Нет evidence предыдущего chunk; порядок подготовки не доказан')
         previous.sort(key=lambda path: int(path.name.split('-')[3]))
@@ -76,7 +78,7 @@ def create(root, d, n, locator, current_diff, capture_baseline):
         path = snapshot_base.safe_path(root, name)
         if not path.is_file() or snapshot_base.digest(path.read_bytes()) != digest:
             raise ValueError('Dirty-база изменилась после baseline; предусловия не доказаны')
-    record = {'version': 1, 'tool': 'attempt-evidence.py prepare', 'status': 'ready',
+    record = {'version': 1, 'tool': 'attempt-evidence.py prepare', 'status': 'ready', 'artifact_targets': targets,
               'slug': d.name, 'chunk': int(n), 'base': base,
               'plan_sha256': text_digest(d / 'plan.md'),
               'locator': {'path': locator, 'sha256': text_digest(locator_path)},
@@ -103,7 +105,7 @@ def create(root, d, n, locator, current_diff, capture_baseline):
     tree = {}
     blobs = d / '.chunk-blobs'
     blobs.mkdir(exist_ok=True)
-    for name, (data, mode) in snapshot_base.project_files(root, git_special=base['kind'] == 'git').items():
+    for name, (data, mode) in snapshot_base.project_files(root, git_special=base['kind'] == 'git', d=d).items():
         digest = snapshot_base.digest(data)
         blob = blobs / digest
         if blob.exists() and blob.read_bytes() != data:
@@ -146,6 +148,8 @@ def errors(root, d, n, expected_hash=None, historical=False):
                 or rec.get('contour') not in ('мелкий', 'полный')):
             return ['Недопустимая квитанция предусловий']
         base, _ = snapshot_base.load(root, d)
+        if rec.get('artifact_targets', []) != artifact_targets(root, d):
+            return ['Цели .sdlc изменились после prepare']
         archived = artifact(d, rec['plan_path'])
         if rec.get('plan_sha256') != text_digest(archived):
             return ['Историческая редакция плана изменена']

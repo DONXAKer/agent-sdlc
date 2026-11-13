@@ -47,7 +47,13 @@ def main() -> int:
         return emit('Scope: файлы вне плана' if mode == 'outside' else 'Scope: пути плана без правок',
                     'fail', [str(error)], 'База scope не подтверждена')
     planned = files_to_touch(plan)
-    touched = [f["path"] for f in patch_files(read(patch_path, "")) if not f["path"].startswith(ARTIFACTS_DIR + "/")]
+    from sdlc_common import artifact_targets, artifact_observed
+    try:
+        targets = artifact_targets(root, root / ARTIFACTS_DIR / slug)
+    except ValueError as error:
+        return emit('Scope: файлы вне плана', 'fail', [str(error)], 'Цели .sdlc не подтверждены')
+    touched = [f["path"] for f in patch_files(read(patch_path, ""))
+               if not f["path"].startswith(ARTIFACTS_DIR + "/") or artifact_observed(f["path"], targets, root / ARTIFACTS_DIR / slug)]
     if mode == "outside":
         gate = "Scope: файлы вне плана"
         baselines = [] if snapshot_mode else sorted((root / ARTIFACTS_DIR / slug).glob(".chunk-*-baseline.json"))

@@ -59,6 +59,7 @@ import argparse
 import difflib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,7 +67,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sdlc_common import (  # noqa: E402
     ARTIFACTS_DIR, diffstat, git_out, git_run, is_junk_path, missing_tool, read, require_base_sha,
-    require_tests_cmd, run_shell, sha256,
+    require_tests_cmd, run_shell, sha256, artifact_targets, artifact_observed, gate_context,
 )
 import snapshot_base
 import chunk_preconditions
@@ -84,7 +85,7 @@ def read_bytes_text(path: Path) -> str:
     return path.read_bytes().decode("utf-8", errors="surrogateescape")
 
 
-def regenerate_diff(root: Path, base_sha: str, canonical=True) -> str:
+def regenerate_diff(root: Path, base_sha: str, canonical=True, d=None) -> str:
     """git diff от базы без .sdlc/** плюс новые нетракованные файлы (как добавленные)."""
     formatting = (['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/',
                    '--output-indicator-new=+', '--output-indicator-old=-', '--output-indicator-context= ']
@@ -92,9 +93,30 @@ def regenerate_diff(root: Path, base_sha: str, canonical=True) -> str:
     rc, diff, err = git_run(["diff", *formatting, base_sha, "--", ".", f":(exclude){ARTIFACTS_DIR}"], root)
     if rc != 0:
         raise SystemExit(f"git diff {base_sha}: код {rc}\n{err}")
+    targets = artifact_targets(root, d) if d else []
+    observed = set(targets)
+    if targets:
+        tracked = git_out(['ls-files', '--', ARTIFACTS_DIR], root) or ''
+        observed.update(name for name in tracked.splitlines() if artifact_observed(name, targets, d))
+        for name in targets:
+            parent = (root / name).parent
+            if parent.is_dir():
+                observed.update(str(path.relative_to(root)).replace('\\', '/') for path in parent.iterdir() if path.is_file())
+        observed.update(str(path.relative_to(root)).replace('\\', '/')
+                        for path in (root / ARTIFACTS_DIR).rglob('*')
+                        if path.is_file() and artifact_observed(str(path.relative_to(root)).replace('\\', '/'), targets, d))
+        observed = {name for name in observed if artifact_observed(name, targets, d)}
+        for name in sorted(observed):
+            snapshot_base.safe_path(root, name)
+            rc, extra, err = git_run(['diff', *formatting, base_sha, '--', ':(literal)' + name], root)
+            if rc:
+                raise ValueError(f'Не удалось построить патч цели: {err}')
+            diff += extra
     untracked = git_out(["ls-files", "--others", "--exclude-standard", "--", ".",
                          f":(exclude){ARTIFACTS_DIR}"], root) or ""
-    for path in sorted(p for p in untracked.splitlines() if p.strip() and not is_junk_path(p)):
+    extra_untracked = {name for name in observed if (root / name).is_file()
+                       and not (git_out(['ls-files', '--', ':(literal)' + name], root) or '').strip()}
+    for path in sorted(p for p in set(untracked.splitlines()) | extra_untracked if p.strip() and not is_junk_path(p)):
         rc, out, err = git_run(["diff", "--no-index", *formatting, "--", "/dev/null", path], root)
         if rc not in (0, 1):
             raise SystemExit(f"git diff --no-index {path}: код {rc}\n{err}")
@@ -107,11 +129,12 @@ def paths_for(d: Path, n: str, k: str):
             d / f"chunk-{n}-attempt-{k}-evidence.json")
 
 
-def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model, force: bool) -> int:
+def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model, force: bool, layer=None) -> int:
     d = root / ARTIFACTS_DIR / slug
     base_sha = require_base_sha(read(d / "plan.md", ""))
     base, snapshot = snapshot_base.load(root, d)
     tests_cmd = tests_cmd or require_tests_cmd(read(root / ARTIFACTS_DIR / "gates.md", ""))
+    context = gate_context(root, d, tests_cmd, n, k, layer, allow_pending_patch=True)
     patch, tests_out, evidence = paths_for(d, n, k)
     if not force and any(p.exists() for p in (patch, tests_out, evidence)):
         print(f"попытка {k} chunk'а {n} уже имеет свидетельства — они не перезаписываются "
@@ -119,19 +142,22 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         return 1
     # История всех попыток должна ссылаться на один и тот же вид и идентификатор базы.
     for previous in d.glob('chunk-*-attempt-*-evidence.json'):
+        if not re.fullmatch(r'chunk-\d+-attempt-\d+-evidence\.json', previous.name):
+            continue
         record = json.loads(read(previous, '{}'))
         previous_base = record.get('base', {'kind': 'git', 'id': record.get('base_sha')})
         if previous_base != base:
             raise ValueError('База отличается от истории попыток; создай новый виток')
-    diff = regenerate_diff(root, base_sha) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot)
+    diff = regenerate_diff(root, base_sha, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
     chunk_diff = None
     if chunk_preconditions.receipt_path(d, n).is_file():
         receipt = json.loads(chunk_preconditions.receipt_path(d, n).read_bytes())
         if 'tree' in receipt:
             chunk_diff = snapshot_base.snapshot_diff(root, chunk_preconditions.load_tree(root, d, n),
-                                                     git_special=base['kind'] == 'git')
+                                                     git_special=base['kind'] == 'git', d=d)
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    rc, output = run_shell(tests_cmd, root)
+    write_bytes_text(patch, diff)
+    rc, output = run_shell(tests_cmd, root, env={**os.environ, **context})
     missing = missing_tool(output, tests_cmd, rc)
     write_bytes_text(patch, diff)
     write_bytes_text(tests_out, output)
@@ -145,7 +171,7 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
                           'receipt_sha256': snapshot_base.digest(chunk_preconditions.receipt_path(d, n).read_bytes())
                           if chunk_preconditions.receipt_path(d, n).is_file() else None},
         "diff_sha256": sha256(diff), "diff_empty": not diff.strip(), "diffstat": diffstat(diff),
-        "tests_cmd": tests_cmd, "tests_exit": rc, "tests_sha256": sha256(output),
+        "tests_cmd": tests_cmd, "tests_exit": rc, "tests_sha256": sha256(output), 'gate_context': context,
         "tests_last_line": last_line[:200], "missing_tool": missing,
         "executor_model": executor_model or "unknown",
         "executor_model_source": "самоотчёт исполнителя (--executor-model)" if executor_model else "не записана",
@@ -219,7 +245,7 @@ def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
     if not patch.exists():
         print(json.dumps({"error": f"нет {patch.name} — верификация не начинается"}, ensure_ascii=False))
         return 2
-    current = regenerate_diff(root, base_sha) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot)
+    current = regenerate_diff(root, base_sha, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
     patch_text = read_bytes_text(patch)
     patch_hash = sha256(patch_text)
     rec = json.loads(evidence.read_text(encoding="utf-8")) if evidence.exists() else None
@@ -248,13 +274,19 @@ def main() -> int:
         argv = ["verify"] + argv[1:]
     elif argv and argv[0] == "--compare":
         argv = ["compare"] + argv[1:]
-    elif argv and argv[0] not in ("write", "baseline", "snapshot", "prepare", "compare", "verify", "-h", "--help"):
+    elif argv and argv[0] not in ("write", "baseline", "snapshot", "prepare", "compare", "verify", "run-gate", "preflight", "-h", "--help"):
         argv = ["write"] + argv
     ap = argparse.ArgumentParser(prog=TOOL, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="mode", required=True)
     w = sub.add_parser("write")
     w.add_argument("root"); w.add_argument("slug"); w.add_argument("n"); w.add_argument("k")
     w.add_argument("--tests-cmd"); w.add_argument("--executor-model"); w.add_argument("--force", action="store_true")
+    w.add_argument('--layer')
+    for mode in ('preflight', 'run-gate'):
+        runner = sub.add_parser(mode)
+        runner.add_argument('root'); runner.add_argument('slug'); runner.add_argument('n'); runner.add_argument('k')
+        runner.add_argument('--command', required=True); runner.add_argument('--layer')
+        runner.add_argument('--phase', choices=('chunk', 'verify'), default='verify')
     b = sub.add_parser("baseline")
     b.add_argument("root"); b.add_argument("slug"); b.add_argument("n")
     s = sub.add_parser('snapshot')
@@ -270,10 +302,21 @@ def main() -> int:
     except SystemExit:
         return 2
     root = Path(a.root).resolve()
+    if not re.fullmatch(r'[\w.-]+', a.slug) or a.slug in ('.', '..'):
+        raise ValueError('Недопустимый slug')
+    if a.mode in ('preflight', 'run-gate'):
+        context = gate_context(root, root / ARTIFACTS_DIR / a.slug, a.command, a.n, a.k, a.layer,
+                               allow_pending_patch=a.mode == 'preflight' and a.phase == 'chunk')
+        if a.mode == 'preflight':
+            print(json.dumps({'status': 'configured', 'inputs': context}, ensure_ascii=False))
+            return 0
+        rc, output = run_shell(a.command, root, env={**os.environ, **context})
+        print(output, end='')
+        return rc
     if a.mode == 'prepare':
         d = root / ARTIFACTS_DIR / a.slug
         base, snapshot = snapshot_base.load(root, d)
-        current = regenerate_diff(root, base['id'], canonical=True) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot)
+        current = regenerate_diff(root, base['id'], canonical=True, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
         receipt = chunk_preconditions.create(root, d, a.n, a.locator, current,
                                               lambda: baseline_mode(root, a.slug, a.n))
         print(json.dumps(receipt, ensure_ascii=False))
@@ -282,7 +325,7 @@ def main() -> int:
         print(json.dumps({'kind': 'snapshot', 'id': snapshot_base.create(root, root / ARTIFACTS_DIR / a.slug)}))
         return 0
     if a.mode == "write":
-        return write_mode(root, a.slug, a.n, a.k, a.tests_cmd, a.executor_model, a.force)
+        return write_mode(root, a.slug, a.n, a.k, a.tests_cmd, a.executor_model, a.force, a.layer)
     if a.mode == "baseline":
         return baseline_mode(root, a.slug, a.n)
     if a.mode == "compare":

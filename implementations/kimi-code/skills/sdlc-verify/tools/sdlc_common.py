@@ -244,10 +244,91 @@ def files_to_touch(plan_text: str):
         cells = [c.strip().strip("`") for c in ln.strip().strip("|").split("|")]
         if not cells or cells[0] in ("Путь", "") or set(cells[0]) <= {"-"}:
             continue
-        if PLACEHOLDER in cells[0] or cells[0].startswith(ARTIFACTS_DIR + "/"):
+        if PLACEHOLDER in cells[0]:
             continue
         paths.append(cells[0])
     return paths
+
+
+def artifact_targets(root, d):
+    """Разреши точные целевые пути; материалы текущего витка не являются целью."""
+    from pathlib import PurePosixPath
+    targets = []
+    for name in files_to_touch(read(d / 'plan.md', '')):
+        if not name.startswith(ARTIFACTS_DIR + '/'):
+            continue
+        path = PurePosixPath(name)
+        target = root / name
+        if (path.is_absolute() or '..' in path.parts or '\\' in name or ':' in name
+                or any(char in name for char in '*?[') or '.git' in path.parts
+                or target.resolve().is_relative_to(d.resolve())
+                or not target.resolve().is_relative_to(root.resolve())
+                or target.is_dir() or target.is_symlink()):
+            raise ValueError(f'Недопустимая цель .sdlc: {name}')
+        if not artifact_observed(name, [name], d):
+            raise ValueError(f'Служебный артефакт не может быть целью: {name}')
+        targets.append(name)
+    return sorted(set(targets))
+
+
+def artifact_observed(name, targets, d=None):
+    """Проверяй также соседние файлы цели, чтобы не скрывать выход за scope."""
+    from pathlib import PurePosixPath
+    if not targets or not name.startswith(ARTIFACTS_DIR + '/'):
+        return False
+    if d is not None and name.startswith(f'{ARTIFACTS_DIR}/{d.name}/'):
+        return False
+    parts = PurePosixPath(name).parts[1:]
+    if any(part.startswith(('.chunk-', '.runner', '.snapshot-'))
+           or part in ('base-snapshot', '.active', '.scope.json', '.review-lock', '.claims-lock', '.events.ndjson')
+           for part in parts):
+        return False
+    return not re.fullmatch(
+        r'(?:intent|readiness|plan(?:-v\d+)?|handoff|exploration-report|clarification-report|acceptance-checks|seed-log|retro-report|state|git-operation(?:-[\w-]+)?)\.(?:md|json)|chunk-\d+-.*|verification-report-.*', parts[-1])
+
+
+def gate_context(root, d, command, chunk=None, attempt=None, layer=None, allow_pending_patch=False):
+    """Разреши только объявленные входы команды из подтверждённого контекста вызова."""
+    path = root / ARTIFACTS_DIR / 'gate-context.json'
+    if not path.exists():
+        return {}
+    contract = json.loads(path.read_text(encoding='utf-8'))
+    if (not isinstance(contract, dict) or contract.get('version') != 1
+            or not isinstance(contract.get('commands'), list)):
+        raise ValueError('Ошибка конфигурации: недопустимый gate-context.json')
+    matches = [item for item in contract['commands'] if isinstance(item, dict) and item.get('command') == command]
+    if len(matches) > 1:
+        raise ValueError('Ошибка конфигурации: команда контекста объявлена повторно')
+    if not matches:
+        return {}
+    inputs = matches[0].get('inputs')
+    if not isinstance(inputs, dict) or not inputs:
+        raise ValueError('Ошибка конфигурации: входы команды не объявлены')
+    values = {'slug': d.name, 'chunk': str(chunk) if chunk is not None else None,
+              'attempt': str(attempt) if attempt is not None else None, 'layer': layer,
+              'patch': str(d / f'chunk-{chunk}-attempt-{attempt}-diff.patch')
+              if chunk is not None and attempt is not None else None}
+    result = {}
+    for name, source in inputs.items():
+        if not re.fullmatch('[A-Za-z_][A-Za-z0-9_]*', name) or not isinstance(source, str) or source not in values:
+            raise ValueError('Ошибка конфигурации: неизвестный вход команды')
+        value = values[source]
+        if value is None or not str(value).strip():
+            raise ValueError(f'Ошибка конфигурации: отсутствует подтверждённый вход {source}')
+        if source in ('chunk', 'attempt') and not re.fullmatch('[1-9][0-9]*', value):
+            raise ValueError(f'Ошибка конфигурации: недопустимый вход {source}')
+        if source == 'slug' and (not re.fullmatch(r'[\w.-]+', value) or value in ('.', '..')):
+            raise ValueError('Ошибка конфигурации: недопустимый slug')
+        if source == 'patch':
+            if not all(re.fullmatch('[1-9][0-9]*', str(item)) for item in (chunk, attempt)):
+                raise ValueError('Ошибка конфигурации: недопустимый адрес патча')
+            patch = Path(value)
+            if not patch.resolve().is_relative_to(d.resolve()) or patch.is_symlink():
+                raise ValueError('Ошибка конфигурации: патч выходит за каталог витка')
+            if not allow_pending_patch and not patch.is_file():
+                raise ValueError('Ошибка конфигурации: патч отсутствует')
+        result[name] = value
+    return result
 
 
 # ---------------------------------------------------------------- git

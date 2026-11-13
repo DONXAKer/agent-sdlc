@@ -800,7 +800,13 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     if plan:
         section = next((s for s in md_sections(plan) if s.startswith("files_to_touch")), "")
         table_rows = [ln for ln in section.splitlines() if ln.strip().startswith("|")]
-        v.check(not any(".sdlc/" in ln for ln in table_rows),
+        from sdlc_common import artifact_targets
+        try:
+            artifact_targets(root, d)
+            targets_ok = True
+        except ValueError:
+            targets_ok = False
+        v.check(targets_ok,
                 "files_to_touch без .sdlc/**", ".sdlc в таблице путей",
                 "артефакты процесса попали в scope кода")
 
@@ -882,7 +888,9 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     except ValueError as error:
         v.fail('снимок базы сохранён и цел', str(error), 'восстанови исходный снимок; не подменяй базу')
     for ev in natsorted(d.glob("chunk-*-attempt-*-evidence.json")):
-        m = re.match(r"chunk-(\d+)-attempt-(\d+)-evidence\.json", ev.name)
+        m = re.fullmatch(r"chunk-(\d+)-attempt-(\d+)-evidence\.json", ev.name)
+        if not m:
+            continue
         try:
             rec = json.loads(read(ev) or "{}")
         except json.JSONDecodeError:

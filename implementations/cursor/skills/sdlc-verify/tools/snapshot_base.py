@@ -9,7 +9,7 @@ import tempfile
 import zlib
 from pathlib import Path, PurePosixPath
 
-from sdlc_common import ARTIFACTS_DIR, git_run, is_junk_path, read, require_base_sha
+from sdlc_common import ARTIFACTS_DIR, git_run, is_junk_path, read, require_base_sha, artifact_targets, artifact_observed
 
 
 def digest(data):
@@ -28,13 +28,22 @@ def kind_of(plan):
     return kind
 
 
-def project_files(root, known_paths=(), git_special=False):
+def project_files(root, known_paths=(), git_special=False, d=None):
     rc, out, err = git_run(['ls-files', '-z', '--cached', '--others', '--exclude-standard'], root)
     if rc:
         raise ValueError(f'Не удалось получить файлы дерева: {err}')
+    targets = artifact_targets(root, d) if d else []
+    names = set(out.split('\0')) | set(known_paths) | set(targets)
+    for name in targets:
+        parent = (root / name).parent
+        if parent.is_dir():
+            names.update(str(path.relative_to(root)).replace('\\', '/') for path in parent.iterdir() if path.is_file())
+    if targets:
+        names.update(str(path.relative_to(root)).replace('\\', '/')
+                     for path in (root / ARTIFACTS_DIR).rglob('*') if path.is_file())
     result = {}
-    for name in sorted((set(out.split('\0')) | set(known_paths)) - {''}):
-        if name.startswith(ARTIFACTS_DIR + '/') or is_junk_path(name):
+    for name in sorted(names - {''}):
+        if (name.startswith(ARTIFACTS_DIR + '/') and not artifact_observed(name, targets, d)) or is_junk_path(name):
             continue
         candidate = root / name
         if git_special and candidate.is_symlink():
@@ -90,8 +99,8 @@ def create(root, d):
     target = d / 'base-snapshot'
     if target.exists() or list(d.glob('chunk-*-attempt-*')) or re.search(r'\*\*Хэш снимка:', plan):
         raise ValueError('База уже создана или попытки начаты; создай новый виток')
-    files = project_files(root)
-    manifest = {'version': 1, 'kind': 'snapshot', 'files': {}}
+    files = project_files(root, d=d)
+    manifest = {'version': 1, 'kind': 'snapshot', 'files': {}, 'artifact_targets': artifact_targets(root, d)}
     # Временный каталог находится рядом: rename публикует только полный снимок.
     with tempfile.TemporaryDirectory(dir=d, prefix='.snapshot-') as tmp:
         staging = Path(tmp) / 'base'
@@ -122,6 +131,8 @@ def load(root, d):
         if digest(raw) != pin.group(1):
             raise ValueError('Manifest снимка изменён')
         manifest = json.loads(raw)
+        if manifest.get('artifact_targets', []) != artifact_targets(root, d):
+            raise ValueError('Цели .sdlc изменились после снимка; создай новый виток')
         if manifest.get('version') != 1 or manifest.get('kind') != 'snapshot' or not isinstance(manifest.get('files'), dict):
             raise ValueError('Недопустимый формат снимка')
         files = {}
@@ -147,10 +158,10 @@ def materialize(files, destination):
         path.chmod(mode if mode in (0o644, 0o755) else 0o644)
 
 
-def snapshot_diff(root, files, current_files=None, git_special=False):
+def snapshot_diff(root, files, current_files=None, git_special=False, d=None):
     """Сравни сырые байты через отдельный Git index без фильтров рабочего проекта."""
     # Новое правило ignore не удаляет ранее сохранённый файл из сравнения.
-    current = project_files(root, files, git_special=git_special) if current_files is None else current_files
+    current = project_files(root, files, git_special=git_special, d=d) if current_files is None else current_files
     # Чтение и проверка полной базы остаются в load. Сокращаем только временную запись.
     changed = {name for name in files.keys() | current.keys() if files.get(name) != current.get(name)}
     before_files = {name: files[name] for name in changed if name in files}

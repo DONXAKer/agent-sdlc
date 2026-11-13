@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "gates"))
 from _common import emit  # noqa: E402
 from sdlc_common import (  # noqa: E402
-    ARTIFACTS_DIR, git_run, is_test_path, missing_tool, read, require_base_sha, require_tests_cmd, run_shell,
+    ARTIFACTS_DIR, git_run, is_test_path, missing_tool, read, require_base_sha, require_tests_cmd, run_shell, gate_context,
 )
 import snapshot_base
 
@@ -73,6 +73,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("root"); ap.add_argument("slug"); ap.add_argument("n"); ap.add_argument("k")
     ap.add_argument("--tests-cmd")
+    ap.add_argument('--layer')
     try:
         a = ap.parse_args()
     except SystemExit:
@@ -93,6 +94,10 @@ def main() -> int:
     if not patch_path.exists():
         return emit(GATE, "skip", [], f"нет {patch_path.name} — проверять нечего")
     patch_text = patch_path.read_bytes().decode("utf-8", errors="surrogateescape")
+    try:
+        context = gate_context(root, d, tests_cmd, n, k, a.layer)
+    except ValueError as error:
+        return emit(GATE, 'fail', [str(error)], 'Входы команды не подтверждены')
     if snapshot is not None and evidence.get('diff_sha256') != hashlib.sha256(patch_path.read_bytes()).hexdigest():
         return emit(GATE, 'fail', [], 'Патч изменён после записи evidence')
     tests_patch = test_only_patch(patch_text)
@@ -111,7 +116,7 @@ def main() -> int:
                         missing_tool="git worktree")
         try:
             # Изменённый тест той же длины не должен прочитать pyc от первого прогона.
-            test_env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+            test_env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **context}
             rc_clean, out_clean = run_shell(tests_cmd, wt, env=test_env)
             tool_missing = missing_tool(out_clean, tests_cmd, rc_clean)
             fails_clean = failures_of(out_clean)

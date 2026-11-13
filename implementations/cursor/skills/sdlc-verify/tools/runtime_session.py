@@ -60,16 +60,18 @@ def tree_digest(tree):
 
 
 def launch(root, storage, executable, args=(), document=None, timeout=None, diagnostic_roots=()):
-    root, storage = plain(root), plain(storage)
+    # Явно выбранные корни сначала канонизируются; вложенные пути сеанса остаются без ссылок.
+    root, storage = plain(Path(root).resolve()), plain(Path(storage).resolve())
     if storage.is_relative_to(root) or root.is_relative_to(storage):
         raise ValueError('Хранилище runtime должно находиться отдельно от исходников')
     found = shutil.which(str(executable))
-    exe = plain(found or executable)
-    target = plain(document) if document else None
+    invocation = Path(os.path.abspath(found or executable))
+    exe = plain(invocation.resolve())
+    target = plain(Path(document).resolve()) if document else None
     if target is not None and (not target.is_relative_to(root) or not target.is_file()):
         raise ValueError('Локальный документ должен существовать внутри исходников')
     before = source_tree(root)
-    external_roots = [plain(path) for path in diagnostic_roots]
+    external_roots = [plain(Path(path).resolve()) for path in diagnostic_roots]
     if any(path.is_relative_to(root) or root.is_relative_to(path) for path in external_roots):
         raise ValueError('Внешние каталоги диагностики должны быть отделены от исходников')
     external_before = {str(plain(path)) for base in external_roots if base.is_dir() for path in base.rglob('*') if path.is_file()}
@@ -82,6 +84,7 @@ def launch(root, storage, executable, args=(), document=None, timeout=None, diag
     for path in (working, diagnostics, temporary):
         path.mkdir()
     record = {'version': 1, 'sessionId': session_id, 'executable': str(exe),
+              'executableInvocation': str(invocation),
               'workingDirectory': str(working), 'sourceRoot': str(root),
               'document': str(target) if target else None,
               'document_sha256': snapshot_base.digest(target.read_bytes()) if target else None,
@@ -102,7 +105,7 @@ def launch(root, storage, executable, args=(), document=None, timeout=None, diag
     with (diagnostics / 'stdout.txt').open('xb') as stdout, (diagnostics / 'stderr.txt').open('xb') as stderr:
         try:
             actual_args = args(record) if callable(args) else args
-            process = subprocess.Popen([str(exe), *map(str, actual_args)], cwd=working, env=environment,
+            process = subprocess.Popen([str(invocation), *map(str, actual_args)], cwd=working, env=environment,
                                        stdout=stdout, stderr=stderr,
                                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             started = {'sessionId': session_id, 'instanceId': session_id, 'pid': process.pid,
@@ -159,7 +162,7 @@ def launch(root, storage, executable, args=(), document=None, timeout=None, diag
 
 
 def cleanup_temporary(storage, session_id):
-    storage = plain(storage)
+    storage = plain(Path(storage).resolve())
     if not __import__('re').fullmatch('[0-9a-f]{32}', session_id):
         raise ValueError('Недопустимый sessionId')
     session = plain(storage / session_id)

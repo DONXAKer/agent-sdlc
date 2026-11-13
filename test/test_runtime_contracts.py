@@ -162,6 +162,38 @@ class RuntimeTests(unittest.TestCase):
             second = runtime_session.tree_digest(runtime_session.source_tree(self.root))
         self.assertNotEqual(first, second)
 
+    @unittest.skipIf(os.name == 'nt', 'Для создания POSIX-ссылок нужен POSIX')
+    def test_selected_executable_and_storage_aliases_resolve_before_launch(self):
+        executable = self.root / 'python-alias'
+        executable.symlink_to(Path(sys.executable).resolve())
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            real = base / 'real-storage'
+            real.mkdir()
+            alias = base / 'storage-alias'
+            alias.symlink_to(real, target_is_directory=True)
+            source_alias = base / 'source-alias'
+            source_alias.symlink_to(self.root, target_is_directory=True)
+            session, ended = runtime_session.launch(source_alias, alias, executable, ['-c', 'print(7)'], document=source_alias / 'app.py')
+            self.assertEqual(ended['exitCode'], 0)
+            self.assertEqual(session.parent, real)
+            self.assertEqual(ended['process']['executable'], str(Path(sys.executable).resolve()))
+
+    @unittest.skipIf(os.name == 'nt', 'Для создания POSIX venv-ссылки нужен POSIX')
+    def test_python_venv_invocation_preserves_environment(self):
+        import tempfile
+        import venv
+        with tempfile.TemporaryDirectory() as temp:
+            environment = Path(temp).resolve() / 'venv'
+            venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+            executable = environment / 'bin/python'
+            session, ended = runtime_session.launch(self.root, self.root.parent / (self.root.name + '-runtime'),
+                executable, ['-c', 'import sys; print(sys.prefix)'])
+            self.assertEqual(ended['exitCode'], 0)
+            prefix = (session / 'diagnostics/stdout.txt').read_text(encoding='utf-8').strip()
+            self.assertEqual(Path(prefix).resolve(), environment)
+
     def test_protocol_rejects_changed_conditions_not_ready_no_restart_and_tamper(self):
         directory = self.d / 'protocol'
         spec = self.spec(restart=True)

@@ -273,6 +273,7 @@ class VerificationRunTests(unittest.TestCase):
 
     def test_new_primary_evidence_keeps_candidate_and_history(self):
         self.prepare()
+        (self.d / 'chunk-1-attempt-1-review-evidence.json').write_text('{}', encoding='utf-8')
         first = verification_runs.record(self.root, self.d, 1, 1, {'files': []})
         path = self.d / 'observation.json'
         path.write_bytes(b'{"answer": 2}')

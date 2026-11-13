@@ -53,7 +53,7 @@
     "skills/sdlc-verify/tools/state_contract/schemas/agent-sdlc-state-v1.schema.json": "cd09a09030aee705c9ba408cefb21302fa2f2799528aafbef4ccbcc9672b6e8f",
     "skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json": "617f34461efe14b3e89add778163dff91849440a5c6954a0345dcfb4fa1ba30e",
     "skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json": "a35e2355667b819f5067d3dbbc4439006cc163c46279d8b63376164ab35c9bed",
-    "skills/sdlc-verify/tools/verification_runs.py": "3d272923d015ea5833e8d08a157c4fcf7f1a1c7061961eb321d35582de2590d4"
+    "skills/sdlc-verify/tools/verification_runs.py": "f6a89177d52d6733f09a1396e2938016216f96786c1809a50e3ee635afb83445"
   },
   "version": "0.1.0"
 }

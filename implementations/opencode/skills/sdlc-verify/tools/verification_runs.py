@@ -75,7 +75,8 @@ def history(directory):
 
 
 def source_history(d, config_hash):
-    paths = sorted(d.glob('chunk-*-attempt-*-evidence.json'),
+    paths = sorted((path for path in d.glob('chunk-*-attempt-*-evidence.json')
+                    if re.fullmatch(r'chunk-(\d+)-attempt-(\d+)-evidence.json', path.name)),
                    key=lambda p: tuple(map(int, re.fullmatch(r'chunk-(\d+)-attempt-(\d+)-evidence.json', p.name).groups())))
     result = []
     count = 0

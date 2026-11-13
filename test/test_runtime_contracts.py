@@ -365,7 +365,7 @@ class ProfileTests(unittest.TestCase):
         import subprocess
         source = ROOT / 'implementations/codex'
         install = subprocess.run([sys.executable, str(source / 'install-codex.py'), '--project', str(self.root)],
-                                 capture_output=True, text=True)
+                                 capture_output=True, text=True, encoding='utf-8')
         self.assertEqual(install.returncode, 0, install.stdout + install.stderr)
         expected = source / 'manifest.json'
         tools = self.root / '.agents/skills/sdlc-verify/tools'

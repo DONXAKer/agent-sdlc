@@ -65,7 +65,7 @@ class DistributionTests(unittest.TestCase):
         for name in ('templates', 'implementations'):
             shutil.copytree(ROOT / name, self.root / name,
                             ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.zip'))
-        for name in ('sdlc-constants.json', 'SDLC.md', 'install.sh', 'junk-names.sh', 'distribution-files.json'):
+        for name in ('sdlc-constants.json', 'SDLC.md', 'runtime-verification.md', 'install.sh', 'junk-names.sh', 'distribution-files.json'):
             shutil.copy2(ROOT / name, self.root / name)
         distribution.sync(self.root)
 

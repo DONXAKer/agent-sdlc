@@ -65,6 +65,7 @@ def encoded(value):
 
 def generated(root):
     desired = {}
+    desired[CLAUDE / 'skills/sdlc-verify/references/runtime-verification.md'] = canonical_bytes(root / 'runtime-verification.md')
     for name, skills in TEMPLATES.items():
         source = Path('templates') / (name + '.template.md')
         for skill in skills:
@@ -84,6 +85,7 @@ def generated(root):
         path = Path('templates') / (name + '.template.md')
         desired[CODEX / 'skills/sdlc-verify/templates' / path.name] = canonical_bytes(root / path)
     desired[CODEX / 'skills/sdlc-run/references/SDLC.md'] = canonical_bytes(root / 'SDLC.md')
+    desired[CODEX / 'skills/sdlc-run/references/runtime-verification.md'] = canonical_bytes(root / 'runtime-verification.md')
     codex_skills = selected_files(root, [name for name in inventory(root)['codex'] if Path(name).is_relative_to(CODEX / 'skills')], desired)
     # Cursor использует те же ресурсы. Меняются только обращения к среде и вызовы навыков.
     for path, data in codex_skills.items():

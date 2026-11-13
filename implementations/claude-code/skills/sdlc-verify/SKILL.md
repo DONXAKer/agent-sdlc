@@ -6,6 +6,10 @@ allowed-tools: Read, Grep, Glob, Write, Edit, Agent, AskUserQuestion, Bash
 
 ## Контракт этапа
 
+Для runtime-испытаний и повторной верификации используй `references/runtime-verification.md`.
+Инструменты `runtime_session.py`, `runtime_protocol.py` и `verification_runs.py` находятся в `tools/`.
+Их квитанции требуют независимого ревью. Они не заменяют claims, гейты и ручную приёмку.
+
 - **Вход:** diff, вывод тестов и evidence попытки; `intent.md`, `plan.md`, `.sdlc/gates.md`, журнал chunk'а
 - **Выход:** `verification-report-N-attempt-K.md`; «Итог» в журнале; `chunk-N-attempt-K-review.md` (ответ рецензента как есть)
 - **Паузы человека:** только неприменимость гейта — её даёт человек; иначе пауз нет

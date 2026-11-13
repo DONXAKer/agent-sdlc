@@ -81,8 +81,9 @@ def main():
         if name not in owned and dest.is_file():
             stale.append(dest)
     if args.check:
-        print('Расхождений:', len(changes) + len(stale))
-        return int(bool(changes or stale))
+        identity_changed = old.get('manifest_sha256') != hashlib.sha256((source / 'manifest.json').read_bytes()).hexdigest()
+        print('Расхождений:', len(changes) + len(stale) + int(identity_changed))
+        return int(bool(changes or stale or identity_changed))
     backup = plain_path(base, '.codex/sdlc-backup-' + str(time.time_ns()))
     for item, dest in changes:
         if dest.exists():
@@ -97,7 +98,9 @@ def main():
         shutil.copy2(dest, saved)
         dest.unlink()
     record.parent.mkdir(parents=True, exist_ok=True)
-    value = json.dumps({'version': manifest['version'], 'files': sorted(owned)}, ensure_ascii=False, indent=2)
+    value = json.dumps({'version': manifest['version'], 'files': sorted(owned),
+                        'manifest_sha256': hashlib.sha256((source / 'manifest.json').read_bytes()).hexdigest()},
+                       ensure_ascii=False, indent=2)
     if not record.exists() or record.read_text(encoding='utf-8') != value:
         record.write_text(value, encoding='utf-8')
     print('Установлено файлов:', len(changes))

@@ -39,6 +39,13 @@ python3 test/verdict.py <run-dir> SCHED-101   # только вердикт по
 
 ## Быстрые проверки контракта без модельных вызовов
 
+`python -B -m unittest test.test_runtime_contracts -v` проверяет поставку, счётчики кандидата, диагностику, readiness и restart.
+Контроли используют отдельный локальный документ и пакетный помощник с разными входами и ожиданиями.
+Это автоматические контролируемые сценарии. Они не заменяют живую игровую приёмку.
+Сводка отдельного запуска Studio находится в `measurements/runtime-session-pilot.json`.
+Studio создала engine-log вне cwd; ограниченный адаптер сохранил журнал с установленным происхождением.
+Документированный RunScript не создал запрошенный outputFile в установленной версии. Readiness и игровой restart остаются непроверенными.
+
 ```bash
 ./sync-templates.sh --check
 python3 -B -m unittest discover -s test -p 'test_state*.py' -v

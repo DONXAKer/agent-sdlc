@@ -33,7 +33,7 @@ def artifact(d, name):
     return target
 
 
-def create(root, d, n, locator, current_diff, capture_baseline):
+def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
     target = receipt_path(d, n)
     if target.exists() or list(d.glob(f'chunk-{n}-attempt-*')):
         raise ValueError('Квитанция уже существует или попытки начаты; поздняя запись не доказывает порядок')
@@ -79,6 +79,7 @@ def create(root, d, n, locator, current_diff, capture_baseline):
         if not path.is_file() or snapshot_base.digest(path.read_bytes()) != digest:
             raise ValueError('Dirty-база изменилась после baseline; предусловия не доказаны')
     record = {'version': 1, 'tool': 'attempt-evidence.py prepare', 'status': 'ready', 'artifact_targets': targets,
+              'profile': profile,
               'slug': d.name, 'chunk': int(n), 'base': base,
               'plan_sha256': text_digest(d / 'plan.md'),
               'locator': {'path': locator, 'sha256': text_digest(locator_path)},

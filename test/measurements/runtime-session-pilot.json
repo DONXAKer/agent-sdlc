@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "application": "Roblox Studio",
+  "application_version": "0.747.0.7471481",
+  "fixture": "Нейтральная локальная XML-сцена с Workspace.ProtocolFixture",
+  "launch": "--task RunScript --localPlaceFile <scene> --runScriptFile <session>/working/probe.luau --outputFile <session>/diagnostics/probe.txt --quitAfterExecution",
+  "sessions": [
+    {
+      "sessionId": "00dd15012011442b9d7e137ac8ff989b",
+      "process": 38456,
+      "startedAt": "2026-11-13T20:57:18.425847+00:00",
+      "endedAt": "2026-11-13T20:57:34.557407+00:00",
+      "exitCode": 0,
+      "timedOut": false,
+      "source_changes": [],
+      "ready_observed": false,
+      "diagnostic_hashes": {
+        "external-63352a82a83d3bb58c64a1c341b031f9768e794a374decb765aee7bdbb7b050b.log": "63352a82a83d3bb58c64a1c341b031f9768e794a374decb765aee7bdbb7b050b",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "external_diagnostics": [
+        {
+          "path": "external-63352a82a83d3bb58c64a1c341b031f9768e794a374decb765aee7bdbb7b050b.log",
+          "sha256": "63352a82a83d3bb58c64a1c341b031f9768e794a374decb765aee7bdbb7b050b",
+          "origin": "new_file_with_unique_session_marker"
+        }
+      ]
+    },
+    {
+      "sessionId": "b0807de4e0b548adb154b6c83b561a5a",
+      "process": 84536,
+      "startedAt": "2026-11-13T20:57:35.649837+00:00",
+      "endedAt": "2026-11-13T20:57:51.487273+00:00",
+      "exitCode": 0,
+      "timedOut": false,
+      "source_changes": [],
+      "ready_observed": false,
+      "diagnostic_hashes": {
+        "external-b488834170dbdc8a3cb7679701b3c97aa616300d944f2aa990fae309847d60ac.log": "b488834170dbdc8a3cb7679701b3c97aa616300d944f2aa990fae309847d60ac",
+        "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "external_diagnostics": [
+        {
+          "path": "external-b488834170dbdc8a3cb7679701b3c97aa616300d944f2aa990fae309847d60ac.log",
+          "sha256": "b488834170dbdc8a3cb7679701b3c97aa616300d944f2aa990fae309847d60ac",
+          "origin": "new_file_with_unique_session_marker"
+        }
+      ]
+    }
+  ],
+  "outcome": "setup_error",
+  "limitation": "Оба процесса завершились штатно. Запрошенный outputFile не появился. Исполнение probe и readiness не подтверждены.",
+  "confirmed": [
+    "Отдельный cwd",
+    "Новые разные PID и instanceId",
+    "Неизменность исходников",
+    "Фактический engine-log вне cwd",
+    "Копия engine-log закреплена SHA-256 и уникальным маркером сеанса"
+  ],
+  "not_verified": [
+    "Готовность игровой сцены",
+    "Игровые поля камеры/viewport/персонажа",
+    "Восстановление игрового состояния после restart"
+  ],
+  "publication": "Никакая сцена, asset или Place не публиковались. Существующие процессы не завершались.",
+  "evidence_scope": "Сводка локального пилота. Полные журналы сохранены локально и не публикуются; сводка не заменяет первичные evidence."
+}

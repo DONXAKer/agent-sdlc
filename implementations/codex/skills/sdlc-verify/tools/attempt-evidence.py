@@ -71,6 +71,7 @@ from sdlc_common import (  # noqa: E402
 )
 import snapshot_base
 import chunk_preconditions
+import profile_guard
 
 TOOL = "attempt-evidence.py"
 VERSION = 2
@@ -131,8 +132,8 @@ def paths_for(d: Path, n: str, k: str):
 
 def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model, force: bool, layer=None) -> int:
     d = root / ARTIFACTS_DIR / slug
-    base_sha = require_base_sha(read(d / "plan.md", ""))
     base, snapshot = snapshot_base.load(root, d)
+    base_sha = base['id'] if base['kind'] == 'git' else None
     tests_cmd = tests_cmd or require_tests_cmd(read(root / ARTIFACTS_DIR / "gates.md", ""))
     context = gate_context(root, d, tests_cmd, n, k, layer, allow_pending_patch=True)
     patch, tests_out, evidence = paths_for(d, n, k)
@@ -140,6 +141,12 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         print(f"попытка {k} chunk'а {n} уже имеет свидетельства — они не перезаписываются "
               f"(следующая попытка = следующий номер; --force только осознанно)")
         return 1
+    tracking = None
+    if (d / 'verification-policy.json').exists():
+        import verification_runs
+        if force:
+            raise ValueError('Политика повторной верификации запрещает --force и замену истории')
+        tracking = verification_runs.track_source(root, d, n, tests_cmd, layer, context)
     # История всех попыток должна ссылаться на один и тот же вид и идентификатор базы.
     for previous in d.glob('chunk-*-attempt-*-evidence.json'):
         if not re.fullmatch(r'chunk-\d+-attempt-\d+-evidence\.json', previous.name):
@@ -171,11 +178,13 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
                           'receipt_sha256': snapshot_base.digest(chunk_preconditions.receipt_path(d, n).read_bytes())
                           if chunk_preconditions.receipt_path(d, n).is_file() else None},
         "diff_sha256": sha256(diff), "diff_empty": not diff.strip(), "diffstat": diffstat(diff),
-        "tests_cmd": tests_cmd, "tests_exit": rc, "tests_sha256": sha256(output), 'gate_context': context,
+        "tests_cmd": tests_cmd, "tests_exit": rc, "tests_sha256": sha256(output), 'gate_context': context, 'layer': layer,
         "tests_last_line": last_line[:200], "missing_tool": missing,
         "executor_model": executor_model or "unknown",
         "executor_model_source": "самоотчёт исполнителя (--executor-model)" if executor_model else "не записана",
     }
+    if tracking is not None:
+        record['candidate_tracking'] = tracking
     if chunk_diff is not None:
         chunk_patch = d / f'chunk-{n}-attempt-{k}-chunk.patch'
         if chunk_patch.exists() and not force:
@@ -239,8 +248,8 @@ def compare_mode(root: Path, slug: str, n: str, k1: str, k2: str) -> int:
 
 def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
     d = root / ARTIFACTS_DIR / slug
-    base_sha = require_base_sha(read(d / "plan.md", ""))
     base, snapshot = snapshot_base.load(root, d)
+    base_sha = base['id'] if base['kind'] == 'git' else None
     patch, tests_out, evidence = paths_for(d, n, k)
     if not patch.exists():
         print(json.dumps({"error": f"нет {patch.name} — верификация не начинается"}, ensure_ascii=False))
@@ -314,11 +323,12 @@ def main() -> int:
         print(output, end='')
         return rc
     if a.mode == 'prepare':
+        profile = profile_guard.before_prepare(Path(__file__).parent, root)
         d = root / ARTIFACTS_DIR / a.slug
         base, snapshot = snapshot_base.load(root, d)
         current = regenerate_diff(root, base['id'], canonical=True, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
         receipt = chunk_preconditions.create(root, d, a.n, a.locator, current,
-                                              lambda: baseline_mode(root, a.slug, a.n))
+                                              lambda: baseline_mode(root, a.slug, a.n), profile=profile)
         print(json.dumps(receipt, ensure_ascii=False))
         return 0
     if a.mode == 'snapshot':

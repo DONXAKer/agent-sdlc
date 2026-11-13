@@ -22,7 +22,11 @@
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
     "implementations/claude-code/skills/sdlc-verify/tools/review_evidence.py",
     "implementations/claude-code/skills/sdlc-verify/tools/git_operation.py",
-    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
+    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
+    "implementations/claude-code/skills/sdlc-verify/tools/profile_guard.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/runtime_session.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/runtime_protocol.py"
   ],
   "codex": [
     "implementations/codex/skills/sdlc-verify/tools/chunk_preconditions.py",
@@ -78,7 +82,12 @@
     "implementations/codex/test_package.py",
     "implementations/codex/skills/sdlc-verify/tools/review_evidence.py",
     "implementations/codex/skills/sdlc-verify/tools/git_operation.py",
-    "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
+    "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
+    "implementations/codex/skills/sdlc-verify/tools/profile_guard.py",
+    "implementations/codex/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/codex/skills/sdlc-verify/tools/runtime_session.py",
+    "implementations/codex/skills/sdlc-verify/tools/runtime_protocol.py",
+    "implementations/codex/skills/sdlc-run/references/runtime-verification.md"
   ],
   "kimi-code": [
     "implementations/kimi-code/README.md",
@@ -133,7 +142,12 @@
     "implementations/kimi-code/test_package.py",
     "implementations/kimi-code/skills/sdlc-verify/tools/review_evidence.py",
     "implementations/kimi-code/skills/sdlc-verify/tools/git_operation.py",
-    "implementations/kimi-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
+    "implementations/kimi-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
+    "implementations/kimi-code/skills/sdlc-verify/tools/profile_guard.py",
+    "implementations/kimi-code/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/kimi-code/skills/sdlc-verify/tools/runtime_session.py",
+    "implementations/kimi-code/skills/sdlc-verify/tools/runtime_protocol.py",
+    "implementations/kimi-code/skills/sdlc-run/references/runtime-verification.md"
   ],
   "claude-code": [
     "implementations/claude-code/skills/sdlc-verify/tools/chunk_preconditions.py",
@@ -185,7 +199,12 @@
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/verify-review-v1.schema.json",
     "implementations/claude-code/skills/sdlc-verify/tools/review_evidence.py",
     "implementations/claude-code/skills/sdlc-verify/tools/git_operation.py",
-    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
+    "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
+    "implementations/claude-code/skills/sdlc-verify/tools/profile_guard.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/runtime_session.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/runtime_protocol.py",
+    "implementations/claude-code/skills/sdlc-verify/references/runtime-verification.md"
   ],
   "opencode": [
     "implementations/opencode/README.md",
@@ -248,6 +267,11 @@
     "implementations/opencode/commands/sdlc-seed.md",
     "implementations/opencode/skills/sdlc-verify/tools/review_evidence.py",
     "implementations/opencode/skills/sdlc-verify/tools/git_operation.py",
-    "implementations/opencode/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json"
+    "implementations/opencode/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
+    "implementations/opencode/skills/sdlc-verify/tools/profile_guard.py",
+    "implementations/opencode/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/opencode/skills/sdlc-verify/tools/runtime_session.py",
+    "implementations/opencode/skills/sdlc-verify/tools/runtime_protocol.py",
+    "implementations/opencode/skills/sdlc-run/references/runtime-verification.md"
   ]
 }

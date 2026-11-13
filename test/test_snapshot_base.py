@@ -107,6 +107,24 @@ class SnapshotTests(unittest.TestCase):
         blob.unlink()
         self.assertEqual(self.tool('attempt-evidence.py', 'verify', self.root, 'T-1', 1, 1).returncode, 1)
 
+    def test_snapshot_prepare_write_verify_without_git_base(self):
+        self.plan.write_text(self.plan.read_text(encoding='utf-8').replace(
+            f'- **База:** {self.base}\n', ''), encoding='utf-8')
+        (self.d / 'locator.md').write_text('Точка правки: app.py.\n', encoding='utf-8')
+        (self.d / 'chunk-1-journal.md').write_text('Подготовка до первой правки.\n', encoding='utf-8')
+        self.snapshot()
+        prepared = self.tool('attempt-evidence.py', 'prepare', self.root, 'T-1', 1, '--locator', 'locator.md')
+        self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
+        (self.root / 'app.py').write_bytes(b'answer = 2\r\n')
+        self.write()
+        verified = self.tool('attempt-evidence.py', 'verify', self.root, 'T-1', 1, 1)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        record = json.loads((self.d / 'chunk-1-attempt-1-evidence.json').read_bytes())
+        self.assertIsNone(record['base_sha'])
+        self.assertEqual(record['preconditions']['errors'], [])
+        (self.d / 'base-snapshot/manifest.json').write_bytes(b'{}')
+        self.assertEqual(self.tool('attempt-evidence.py', 'verify', self.root, 'T-1', 1, 1).returncode, 1)
+
     def test_explicit_selection_and_history_cannot_be_replaced(self):
         self.plan.write_text(self.plan.read_text(encoding='utf-8').replace('snapshot', 'git'), encoding='utf-8')
         self.assertEqual(self.tool('attempt-evidence.py', 'snapshot', self.root, 'T-1').returncode, 1)

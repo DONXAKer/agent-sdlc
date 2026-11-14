@@ -420,14 +420,18 @@ def first_verify_succeeded(d, report):
 
 def defect_record_errors(d, handoff):
     """Не превращай любой failed-отчёт в дефект. Требуй подтверждённую находку или явную запись."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('defect_review', Path(__file__).with_name('review-validate.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
     required, history_errors = set(), []
     for validation in d.glob('.review-validation-*-attempt-*.json'):
         try:
             n, k = map(int, re.findall(r'\d+', validation.name))
             rec = json.loads(validation.read_bytes())
-            review_path = d / f'chunk-{n}-attempt-{k}-review.md'
+            review_path = module.confirmed_answer(d, rec, n, k)
             patch_path = d / f'chunk-{n}-attempt-{k}-diff.patch'
-            if (rec.get('version') != 1 or rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
+            if (rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
                     or rec.get('chunk') != n or rec.get('attempt') != k
                     or rec.get('review_sha256') != snapshot_base.digest(review_path.read_bytes())
                     or rec.get('patch_sha256') != snapshot_base.digest(patch_path.read_bytes())):
@@ -446,10 +450,6 @@ def defect_record_errors(d, handoff):
         findings = review.get('findings')
         if not isinstance(findings, list) or not isinstance(review.get('claims'), list):
             continue
-        import importlib.util
-        spec = importlib.util.spec_from_file_location('defect_review', Path(__file__).with_name('review-validate.py'))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
         patch = path.with_name(path.name.replace('-review.md', '-diff.patch'))
         if not patch.is_file():
             continue
@@ -462,7 +462,8 @@ def defect_record_errors(d, handoff):
             claim_ids = claims_in(read(archived_intent if archived_intent.exists() else d / 'intent.md') or '')
             if validation.exists():
                 rec = json.loads(validation.read_bytes())
-                if (rec.get('version') != 1 or rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
+                if (module.confirmed_answer(d, rec, n, k) != path
+                        or rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
                         or rec.get('chunk') != n or rec.get('attempt') != k
                         or rec.get('review_sha256') != snapshot_base.digest(path.read_bytes())
                         or rec.get('patch_sha256') != snapshot_base.digest(patch.read_bytes())):

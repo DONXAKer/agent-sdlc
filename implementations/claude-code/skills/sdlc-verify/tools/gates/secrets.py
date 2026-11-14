@@ -7,6 +7,8 @@
 присваивания password/secret/token/api_key литералом. Строка с пометкой `sdlc:not-a-secret`
 (в комментарии рядом) исключается — явное решение, а не молчаливый пропуск.
 Контракт вывода — см. _common.py.
+Обязательный патч должен быть доступен для чтения. Ошибка входа даёт fail и код 1.
+Существующий пустой файл проверяется отдельно и считается чистым патчем.
 """
 
 import re
@@ -14,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import emit, patch_hunks, read  # noqa: E402
+from _common import emit, patch_hunks  # noqa: E402
 
 GATE = "Секреты в diff"
 PATTERNS = [
@@ -36,7 +38,11 @@ def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__)
         return 2
-    patch = read(Path(sys.argv[1]), "")
+    try:
+        patch = Path(sys.argv[1]).read_bytes().decode('utf-8', errors='surrogateescape')
+    except OSError as error:
+        return emit(GATE, 'fail', [str(sys.argv[1])],
+                    f'Патч недоступен для чтения: {type(error).__name__}')
     evidence = []
     for path, ln, sign, text in patch_hunks(patch):
         if sign != "+" or ALLOW in text:

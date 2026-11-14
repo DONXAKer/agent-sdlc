@@ -147,6 +147,23 @@ def validate(review, intent_claims: set, paths: set, primary_paths=None, artifac
     return errors, statuses
 
 
+def confirmed_answer(d, record, n, k):
+    """Разреши путь подтверждённой побайтовой копии; старые квитанции используют каноническое имя."""
+    name = f'chunk-{n}-attempt-{k}-review.md'
+    if record.get('version') == 1:
+        if 'review_path' in record:
+            raise ValueError('Историческая квитанция не должна подменять путь ответа')
+    elif record.get('version') == 2:
+        if record.get('review_path') != name or not isinstance(record.get('source_review_path'), str) or not record['source_review_path']:
+            raise ValueError('Путь подтверждённого ответа не соответствует chunk и attempt')
+    else:
+        raise ValueError('Неизвестная версия квитанции ревью')
+    path = snapshot_base.safe_path(d, name)
+    if path.is_symlink():
+        raise ValueError('Подтверждённый ответ не должен быть ссылкой')
+    return path
+
+
 def main() -> int:
     if len(sys.argv) != 6:
         print(__doc__)
@@ -162,7 +179,12 @@ def main() -> int:
     intent_claims = claims_in(read(d / "intent.md", ""))
     patch = d / f"chunk-{n}-attempt-{k}-diff.patch"
     paths = set(diffstat(patch.read_bytes().decode("utf-8", errors="surrogateescape"))["paths"]) if patch.exists() else set()
-    review, err = extract_json(answer.read_text(encoding="utf-8", errors="replace"))
+    try:
+        raw_answer = answer.read_bytes()
+    except OSError as error:
+        print(json.dumps({'valid': False, 'errors': [f'Ответ недоступен для чтения: {error}'], 'claims': {}}, ensure_ascii=False))
+        return 1
+    review, err = extract_json(raw_answer.decode('utf-8', errors='replace'))
     if err:
         print(json.dumps({"valid": False, "errors": [err], "claims": {}}, ensure_ascii=False))
         return 1
@@ -171,16 +193,32 @@ def main() -> int:
         artifacts = artifact_aliases(slug)
         errors, statuses = validate(review, intent_claims, paths, primary_paths, artifacts)
         if not errors:
-            record = {'version': 1, 'tool': 'review-validate.py', 'slug': slug,
+            record = {'version': 2, 'tool': 'review-validate.py', 'slug': slug,
                       'chunk': int(n), 'attempt': int(k), 'claim_ids': sorted(intent_claims),
-                      'review_sha256': snapshot_base.digest(answer.read_bytes()),
+                      'review_sha256': snapshot_base.digest(raw_answer),
                       'patch_sha256': snapshot_base.digest(patch.read_bytes()),
-                      'primary_paths': sorted(primary_paths)}
+                      'primary_paths': sorted(primary_paths),
+                      'review_path': f'chunk-{n}-attempt-{k}-review.md',
+                      'source_review_path': str(answer.resolve())}
             receipt = d / f'.review-validation-{n}-attempt-{k}.json'
             if receipt.exists():
-                if json.loads(receipt.read_bytes()) != record:
+                previous = json.loads(receipt.read_bytes())
+                expected = dict(record)
+                if previous.get('version') == 1:
+                    expected['version'] = 1
+                    expected.pop('review_path')
+                    expected.pop('source_review_path')
+                if previous != expected:
                     raise ValueError('Квитанция ревью уже существует с другими входами')
+                record = previous
+            canonical = confirmed_answer(d, record, n, k)
+            if canonical.exists():
+                if canonical.read_bytes() != raw_answer:
+                    raise ValueError('Подтверждённый ответ уже существует с другими байтами')
             else:
+                with canonical.open('xb') as output:
+                    output.write(raw_answer)
+            if not receipt.exists():
                 with receipt.open('x', encoding='utf-8') as output:
                     json.dump(record, output, ensure_ascii=False, indent=2)
     except Exception as e:  # структура вне ожиданий — ошибка в списке, не traceback

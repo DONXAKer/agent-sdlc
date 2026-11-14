@@ -241,6 +241,9 @@ CONSUMERS = {
     "verdict_table": lambda: True,
     "overwrite_threshold_percent": lambda: '"overwrite_threshold_percent"' in py_text,
     "defect_classes": lambda: all(cls in sdlc for cls in C["defect_classes"]),
+    "defect_class_aliases": lambda: 'defect_class_aliases' in py_text and all(
+        target in C['defect_classes'] and alias not in C['defect_classes']
+        for alias, target in C['defect_class_aliases'].items()),
 }
 for key in C:
     if key.startswith("_") or key == "version":

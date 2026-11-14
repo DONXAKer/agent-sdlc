@@ -1,6 +1,8 @@
 """Побайтовый пакет первичных доказательств. Не вычисляет результат приёмки.
 
 Подготовка: python review_evidence.py <корень> <slug> <N> <K> <manifest.json>
+Контекст reviewer: python review_evidence.py --context <корень> <slug> <N> <K>
+evidencePath берётся из manifest.path; archiveMember указывает отдельное транспортное имя ZIP.
 Manifest: {"files": [{"path": "qa/result.json", "claims": ["claim-1"],
 "kind": "observation|stdout|screenshot|sql_trace|fixture", "source": "команда или источник",
 "sha256": "64 hex", "revision": {"head_sha": "...", "diff_sha256": "..."}}]}.
@@ -30,6 +32,21 @@ def candidate(root, d, n, k):
 def paths(d, n, k):
     stem = f'chunk-{n}-attempt-{k}-review-evidence'
     return d / (stem + '.zip'), d / (stem + '.json')
+
+
+def context_path(d, n, k):
+    return d / f'chunk-{n}-attempt-{k}-review-evidence-context.json'
+
+
+def reviewer_context(root, d, n, k):
+    """Получить проверенную карту адресов до первого ответа reviewer, не изменяя пакет."""
+    if not paths(d, n, k)[0].is_file():
+        raise ValueError('Первичный пакет отсутствует; контекст reviewer не подтверждён')
+    context = verify(root, d, n, k, with_context=True)
+    saved = context_path(d, n, k)
+    if saved.exists() and json.loads(saved.read_bytes()) != context:
+        raise ValueError('Карта адресов reviewer отличается от проверенного пакета')
+    return context
 
 
 def checked(root, d, manifest, revision):
@@ -80,7 +97,7 @@ def prepare(root, d, n, k, manifest):
     revision = candidate(root, d, n, k)
     files = checked(root, d, manifest, revision)
     package, receipt = paths(d, n, k)
-    if package.exists() or receipt.exists():
+    if package.exists() or receipt.exists() or context_path(d, n, k).exists():
         raise ValueError('Пакет попытки уже существует; сохрани новую попытку')
     with zipfile.ZipFile(package, 'x', compression=zipfile.ZIP_DEFLATED) as output:
         output.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False).encode('utf-8'))
@@ -90,10 +107,13 @@ def prepare(root, d, n, k, manifest):
            'revision': revision, 'package_sha256': snapshot_base.digest(package.read_bytes())}
     with receipt.open('x', encoding='utf-8') as output:
         json.dump(rec, output, ensure_ascii=False, indent=2)
-    return verify(root, d, n, k)
+    context = verify(root, d, n, k, with_context=True)
+    with context_path(d, n, k).open('x', encoding='utf-8') as output:
+        json.dump(context, output, ensure_ascii=False, indent=2)
+    return {item['evidencePath'] for item in context['files']}
 
 
-def verify(root, d, n, k):
+def verify(root, d, n, k, with_context=False):
     package, receipt = paths(d, n, k)
     if not package.exists() and not receipt.exists():
         return set()
@@ -110,15 +130,30 @@ def verify(root, d, n, k):
         for name, raw in files.items():
             if archive.read('files/' + name) != raw:
                 raise ValueError('Переданные байты отличаются от исходного доказательства')
+    if with_context:
+        by_name = {item['path']: item for item in manifest['files']}
+        return {'version': 1, 'revision': rec['revision'], 'package_sha256': rec['package_sha256'],
+                'files': [{'evidencePath': name, 'archiveMember': 'files/' + name,
+                           'sha256': by_name[name]['sha256'], 'claims': by_name[name]['claims']}
+                          for name in sorted(files)]}
     return set(files)
 
 
 if __name__ == '__main__':
     try:
-        root, slug, n, k, source = sys.argv[1:]
+        argv = sys.argv[1:]
+        context_only = bool(argv and argv[0] == '--context')
+        if context_only:
+            root, slug, n, k = argv[1:]
+        else:
+            root, slug, n, k, source = argv
         root = Path(root).resolve()
-        result = prepare(root, root / '.sdlc' / slug, n, k, json.loads(Path(source).read_bytes()))
-        print(json.dumps({'files': sorted(result)}, ensure_ascii=False))
+        d = root / '.sdlc' / slug
+        if context_only:
+            print(json.dumps(reviewer_context(root, d, n, k), ensure_ascii=False))
+        else:
+            result = prepare(root, d, n, k, json.loads(Path(source).read_bytes()))
+            print(json.dumps({'files': sorted(result), 'reviewerContext': reviewer_context(root, d, n, k)}, ensure_ascii=False))
     except (ValueError, OSError, KeyError, TypeError, zipfile.BadZipFile) as error:
         print(json.dumps({'error': str(error)}, ensure_ascii=False))
         sys.exit(1)

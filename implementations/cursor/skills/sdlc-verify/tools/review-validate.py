@@ -164,6 +164,21 @@ def confirmed_answer(d, record, n, k):
     return path
 
 
+def retain_rejected(d, n, k, raw):
+    """Сохрани непринятый ответ до ремонта адресов, не меняя его статусы и находки."""
+    name = f'chunk-{n}-attempt-{k}-rejected-review-{snapshot_base.digest(raw)}.md'
+    target = snapshot_base.safe_path(d, name)
+    if target.is_symlink():
+        raise ValueError('Архив непринятого ответа не должен быть ссылкой')
+    if target.exists():
+        if target.read_bytes() != raw:
+            raise ValueError('Исторический непринятый ответ изменён')
+    else:
+        with target.open('xb') as output:
+            output.write(raw)
+    return name
+
+
 def main() -> int:
     if len(sys.argv) != 6:
         print(__doc__)
@@ -186,7 +201,12 @@ def main() -> int:
         return 1
     review, err = extract_json(raw_answer.decode('utf-8', errors='replace'))
     if err:
-        print(json.dumps({"valid": False, "errors": [err], "claims": {}}, ensure_ascii=False))
+        rejected = None
+        try:
+            rejected = retain_rejected(d, n, k, raw_answer)
+        except (OSError, ValueError) as error:
+            err += f'; непринятый ответ не сохранён: {error}'
+        print(json.dumps({"valid": False, "errors": [err], "claims": {}, 'rejected_review_path': rejected}, ensure_ascii=False))
         return 1
     try:
         primary_paths = review_evidence.verify(root, d, n, k)
@@ -223,7 +243,13 @@ def main() -> int:
                     json.dump(record, output, ensure_ascii=False, indent=2)
     except Exception as e:  # структура вне ожиданий — ошибка в списке, не traceback
         errors, statuses = [f"структура ответа не разбирается: {type(e).__name__}: {e}"], {}
-    print(json.dumps({"valid": not errors, "errors": errors, "claims": statuses,
+    rejected = None
+    if errors:
+        try:
+            rejected = retain_rejected(d, n, k, raw_answer)
+        except (OSError, ValueError) as error:
+            errors.append(f'Непринятый ответ не сохранён: {error}')
+    print(json.dumps({"valid": not errors, "errors": errors, "claims": statuses, 'rejected_review_path': rejected,
                       "review": review if not errors else None}, ensure_ascii=False, indent=2))
     return 0 if not errors else 1
 

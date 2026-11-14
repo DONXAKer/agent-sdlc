@@ -29,7 +29,7 @@ from sdlc_common import (  # noqa: E402  — константы и разбор:
     ACTIONS, AXES, CHUNK_FILES, CHUNK_LINES, CONSTANTS, DEFAULT_BUDGET as _DEFAULT_BUDGET,
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
     gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path, preparation_checks,
-    readiness_verdict, readiness_ok, diffstat,
+    readiness_verdict, readiness_ok, diffstat, defect_class_catalog, defect_class_name,
 )
 import snapshot_base
 import chunk_preconditions
@@ -323,6 +323,8 @@ def do_metrics(root: Path) -> int:
         print("нет .sdlc/ — метрик считать не из чего")
         return 0
     rows = []
+    catalog = defect_class_catalog(read(sdlc / 'gates.md') or '')
+    diagnostics = list(catalog['errors'])
     for d in sorted(p for p in sdlc.iterdir() if p.is_dir()):
         if not (d / "intent.md").exists():
             continue
@@ -334,8 +336,13 @@ def do_metrics(root: Path) -> int:
                            if confirmed_verify(d, report)), None)
         textual = any(re.search(r'\*\*passed:\*\*\s*true', read(p) or '') for p in reports)
         ho = read(d / "handoff.md")
-        classes = {c.strip() for c in re.findall(r"^-\s*\*\*Класс:\*\*\s*(.+)", ho or "", re.M)
-                   if c.strip().strip('*`_').strip().casefold() not in {'н/п', 'нет', 'не применимо', 'none', 'n/a', '-'}}
+        classes = set()
+        for value in re.findall(r'^-\s*\*\*Класс:\*\*[^\S\n]*([^\n]*)', ho or '', re.M):
+            name, diagnostic = defect_class_name(value, catalog)
+            if name is not None:
+                classes.add(name)
+            if diagnostic:
+                diagnostics.append(f'{d.name}/handoff.md: {diagnostic}')
         rows.append(dict(
             slug=d.name, attempts=len(nums), reports=len(reports),
             budget=budget_of(j) if j else "-", passed_at=first_pass,
@@ -366,6 +373,8 @@ def do_metrics(root: Path) -> int:
     for c, v in sorted(repeated.items()):
         print(f"  ПОВТОР «{c}» — {', '.join(v)} → SDLC.md → «Когда дефект проскочил»: "
               f"править систему, не случай")
+    for diagnostic in diagnostics:
+        print('Диагностика классов: ' + diagnostic)
     return 0
 
 
@@ -425,6 +434,7 @@ def defect_record_errors(d, handoff):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     required, history_errors = set(), []
+    catalog = defect_class_catalog(read(d.parent / 'gates.md') or '')
     for validation in d.glob('.review-validation-*-attempt-*.json'):
         try:
             n, k = map(int, re.findall(r'\d+', validation.name))
@@ -495,6 +505,12 @@ def defect_record_errors(d, handoff):
                          or [None, ''])[1].strip() for name in fields}
         if values['Имя'] in ('нет', 'н/п', ''):
             continue
+        class_name, class_error = defect_class_name(values['Класс'], catalog)
+        errors.extend(catalog['errors'])
+        if class_error:
+            errors.append(class_error)
+        if class_name is None:
+            errors.append('Для реального дефекта требуется класс из канонического или проектного словаря')
         for name, value in values.items():
             if (not value or '‹' in value or 'не утверждено' in value
                     or value == 'н/п' and name != 'Повтор'):

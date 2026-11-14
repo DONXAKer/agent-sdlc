@@ -100,6 +100,41 @@ def read(path: Path, default=None):
     return path.read_text(encoding="utf-8", errors="replace") if path.exists() else default
 
 
+def defect_class_catalog(gates_text=''):
+    """Канонический словарь и явно объявленные проектные классы; пунктуация имён значима."""
+    canonical = set(CONSTANTS.get('defect_classes', ()))
+    aliases = dict(CONSTANTS.get('defect_class_aliases', {}))
+    project, errors = set(), []
+    section = re.search(r'^## Классы дефектов проекта\s*\n(.*?)(?=^## |\Z)', gates_text or '', re.M | re.S)
+    if section:
+        for line in section.group(1).splitlines():
+            if not line.lstrip().startswith('- ') or line.strip() == '- своих классов нет':
+                continue
+            match = re.fullmatch(r'\s*-\s+(?:`([^`]+)`|(.+?))\s+—\s+(\d{4}-\d{2}-\d{2})\s*', line)
+            if not match:
+                errors.append('Класс проекта объявляется строкой «- `имя` — YYYY-MM-DD»: ' + line.strip())
+                continue
+            name = (match.group(1) or match.group(2)).strip()
+            if not name or name in canonical or name in aliases or name in project:
+                errors.append('Неоднозначное или повторное имя класса проекта: ' + name)
+                continue
+            project.add(name)
+    return {'canonical': canonical, 'project': project, 'aliases': aliases, 'errors': errors}
+
+
+def defect_class_name(value, catalog):
+    """Общий разбор для новых записей и наблюдательных метрик без переписывания источника."""
+    raw = (value or '').strip()
+    if raw.strip('*`_').strip().casefold() in {'', 'н/п', 'нет', 'не применимо', 'none', 'n/a', '-'}:
+        return None, None
+    name = raw
+    if name in catalog['canonical'] | catalog['project']:
+        return name, None
+    if name in catalog['aliases'] and catalog['aliases'][name] in catalog['canonical']:
+        return catalog['aliases'][name], None
+    return name, f'Неизвестный класс дефекта «{name}»: выбери канонический класс или объяви его в наборе проекта'
+
+
 # ---------------------------------------------------------------- план и набор
 def base_sha_of(plan_text: str):
     m = re.search(r"\*\*База:\*\*\s*`?([0-9a-fA-F]{7,40})", plan_text or "")

@@ -18,7 +18,8 @@ CLAUDE.md перечисляет сквозные инварианты («одн
   8. метки решений человека из констант присутствуют в шаблонах;
   9. имена файлов реализации (*.py), упомянутые в SDLC.md и шаблонах, существуют в дереве;
  10. test/README.md перечисляет все кейсы корпуса flow-verdict;
- 11. каждый шаблон начинается строкой версии формы `<!-- sdlc-template: <имя> vN -->`.
+ 11. каждый шаблон начинается строкой версии формы `<!-- sdlc-template: <имя> vN -->`;
+ 12. словарь вердикта готовности readiness_verdicts согласован в константах, шаблоне и коде.
 
 Запуск: python tools/check-consistency.py   (код возврата 1 при расхождении)
 """
@@ -240,6 +241,8 @@ CONSUMERS = {
     "defect_actions": lambda: all(a in templates_text for a in C["defect_actions"]),
     "verdict_table": lambda: True,
     "overwrite_threshold_percent": lambda: '"overwrite_threshold_percent"' in py_text,
+    "readiness_verdicts": lambda: '"readiness_verdicts"' in py_text and
+                                  "readiness_verdicts" in read("templates/readiness.template.md"),
     "defect_classes": lambda: all(cls in sdlc for cls in C["defect_classes"]),
     "defect_class_aliases": lambda: 'defect_class_aliases' in py_text and all(
         target in C['defect_classes'] and alias not in C['defect_classes']
@@ -279,6 +282,18 @@ for p in (ROOT / "templates").glob("*.template.md"):
     name = p.name.replace(".template.md", "")
     if not re.fullmatch(rf"<!-- sdlc-template: {re.escape(name)} v\d+ -->", first):
         fail(str(p.relative_to(ROOT)), f"первая строка не «<!-- sdlc-template: {name} vN -->»")
+
+# --- 12. Словарь вердикта готовности ------------------------------------------------------------
+rv = C["readiness_verdicts"]
+ready_tpl = read("templates/readiness.template.md")
+for value in (rv["ready"], rv["not_ready"]):
+    if f"`{value}`" not in ready_tpl:
+        fail("templates/readiness.template.md", f"словарное значение вердикта «{value}» не названо в строгом правиле")
+if "Вердикт — ровно" not in ready_tpl:
+    fail("templates/readiness.template.md", "нет строки строгого правила вердикта")
+master_common = read("implementations/claude-code/skills/sdlc-verify/tools/sdlc_common.py")
+if '"readiness_verdicts"' not in master_common:
+    fail("sdlc_common.py", "readiness_ok не читает словарь readiness_verdicts из констант")
 
 # --- Итог --------------------------------------------------------------------------------------
 if failures:

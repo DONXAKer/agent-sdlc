@@ -18,7 +18,7 @@ import chunk_preconditions
 import snapshot_base
 import review_evidence
 import git_operation
-from sdlc_common import diffstat, preparation_checks
+from sdlc_common import diffstat, preparation_checks, readiness_ok
 
 spec = importlib.util.spec_from_file_location('primary_review', fixtures.fixtures.TOOLS / 'review-validate.py')
 review_validator = importlib.util.module_from_spec(spec)
@@ -389,6 +389,30 @@ class OpenIssueTests(fixtures.ContextEvidenceTests):
         self.assertEqual(saved['preconditions']['receipt_sha256'], snapshot_base.digest(raw))
         canonical = raw.replace(b'\r\n', b'\n')
         self.assertEqual(saved['preconditions']['receipt_sha256'], snapshot_base.digest(canonical))
+
+
+class ReadinessVerdictDictionaryTests(unittest.TestCase):
+    """#72: вердикт прогона — только словарные формы; контракт совпадает с Runner readinessVerdict."""
+
+    LINE = '**Вердикт прогона 1:** {}'
+
+    def test_accepted_dictionary_forms(self):
+        for value in ('готова', 'готова.', 'готова!', '✅ готова', 'Готова', 'ГОТОВА',
+                      'готова — закрыть вопрос 2', 'готова – пояснение', 'готова - пояснение',
+                      '  готова  ', '**готова**', '`готова`', 'готова   —   пояснение'):
+            self.assertTrue(readiness_ok(self.LINE.format(value), 1), value)
+
+    def test_rejected_free_prose_and_weakened_forms(self):
+        for value in ('не готова', 'не готова — причины', 'готова для разведки',
+                      'готова к утверждённому плану', 'готова к плану — вопросов нет',
+                      'почти готова', 'частично готова', 'условно готова', 'готова с оговорками',
+                      'задача готова', 'готова / не готова', '‹готова / не готова›',
+                      '', 'Не вычислен', 'готова; готова к плану'):
+            self.assertFalse(readiness_ok(self.LINE.format(value), 1), value)
+
+    def test_missing_verdict_line_is_not_ready(self):
+        self.assertFalse(readiness_ok('', 1))
+        self.assertFalse(readiness_ok('## Прогон 1\n- **Дата:** 2026-11-16\n', 1))
 
 
 if __name__ == '__main__':

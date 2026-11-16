@@ -53,6 +53,10 @@ DEFAULT_BUDGET = int(CONSTANTS.get("attempt_default_budget", 3))
 CHUNK_LINES = int((CONSTANTS.get("chunk_size_guideline") or {}).get("changed_lines", 400))
 CHUNK_FILES = int((CONSTANTS.get("chunk_size_guideline") or {}).get("files", 8))
 OVERWRITE_PERCENT = int(CONSTANTS.get("overwrite_threshold_percent", 50))
+READINESS_VERDICTS = CONSTANTS.get("readiness_verdicts") or {}
+READY_WORD = READINESS_VERDICTS.get("ready", "готова")
+READY_SEPARATORS = "".join(re.escape(s) for s in
+                           READINESS_VERDICTS.get("note_separators", ["—", "–", "-"]))
 
 
 def claims_in(text) -> set:
@@ -65,8 +69,14 @@ def readiness_verdict(readiness, n):
 
 
 def readiness_ok(readiness, n):
-    value = re.sub(r'\s+', ' ', re.sub(r'[*_`]', '', readiness_verdict(readiness, n).lower()))
-    return bool(re.search(r'(?<!\w)готова', value)) and 'не готова' not in value
+    """Вердикт только из словаря readiness_verdicts: ровно «готова» (допустимы ✅, «.»/«!»,
+    пояснение через тире) либо «не готова». Свободная проза («готова для разведки…»)
+    готовность не даёт — тот же контракт, что проверяет Runner readinessVerdict."""
+    raw = readiness_verdict(readiness, n)
+    value = re.sub(r'\s+', ' ', re.sub(r'[*_`]', '', raw.lower().replace('ё', 'е'))).strip()
+    if not value or PLACEHOLDER in raw or re.search(rf'{READY_WORD}\s*/\s*не\s+{READY_WORD}', value):
+        return False
+    return bool(re.match(rf'^(?:✅\s*)?{READY_WORD}(?:[.!]|\s+[{READY_SEPARATORS}]\s+\S.*)?$', value))
 
 
 def preparation_checks(intent, plan, readiness, small=False):

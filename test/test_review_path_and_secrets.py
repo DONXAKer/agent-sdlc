@@ -142,7 +142,7 @@ class SecretsInputTests(unittest.TestCase):
         self.root = Path(self.temp.name)
 
     def test_distributed_gates_missing_directory_clean_empty_and_secret(self):
-        variants = ('claude-code', 'codex', 'cursor', 'kimi-code', 'opencode')
+        variants = ('claude-code', 'codex', 'cursor', 'kimi-code', 'opencode', 'qwen-code')
         clean = self.root / 'clean.patch'
         clean.write_bytes(b'diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+value=7\n')
         empty = self.root / 'empty.patch'

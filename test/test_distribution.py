@@ -142,8 +142,34 @@ class DistributionTests(unittest.TestCase):
         subprocess.run([sys.executable, str(dest / '.kimi-code/skills/sdlc-verify/tools/flow-verdict.py'),
                         '--metrics', str(dest)], check=True)
 
+    def test_qwen_code_archive_installs_without_checkout(self):
+        archives = {path.name: path for path in distribution.package(self.root, revision='test-revision')}
+        unpacked = Path(self.temp.name) / 'qwen-распаковано'
+        with zipfile.ZipFile(archives['agent-sdlc-qwen-code.zip']) as archive:
+            self.assertIsNone(archive.testzip())
+            archive.extractall(unpacked)
+        install = unpacked / 'agent-sdlc-qwen-code/install-qwen-code.py'
+        dest = Path(self.temp.name) / 'qwen-установка'
+        subprocess.run([sys.executable, str(install), '--project', str(dest)], check=True)
+        subprocess.run([sys.executable, str(install), '--project', str(dest), '--check'], check=True)
+        subprocess.run([sys.executable, str(dest / '.qwen/skills/sdlc-verify/tools/flow-verdict.py'),
+                        '--metrics', str(dest)], check=True)
+
+    def test_automation_includes_generated_qwen_code_changes(self):
+        before = self.snapshot()
+        source = self.root / 'SDLC.md'
+        source.write_bytes(source.read_bytes() + b'\n')
+        distribution.sync(self.root)
+        changes = [path.as_posix() for path, data in self.snapshot().items()
+                   if before.get(path) != data and path.is_relative_to(distribution.QWEN)]
+        workflow = (ROOT / '.github/workflows/distribution.yml').read_text(encoding='utf-8')
+        patterns = [line.strip() for line in workflow.split('add-paths: |', 1)[1].split('  release:', 1)[0].splitlines()]
+        self.assertTrue(changes)
+        for name in changes:
+            self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns), name)
+
     def test_unowned_templates_survive_with_and_without_record(self):
-        for variant in (distribution.CLAUDE, distribution.CODEX, distribution.KIMI):
+        for variant in (distribution.CLAUDE, distribution.CODEX, distribution.KIMI, distribution.QWEN):
             for name in ('notes.txt', 'custom.template.md'):
                 path = self.root / variant / 'skills/sdlc-verify/templates' / name
                 path.write_bytes(b'private notes')
@@ -154,12 +180,12 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual(before, {p: p.read_bytes() for p in before})
 
     def test_unlisted_files_never_enter_manifest_or_archives(self):
-        for variant in (distribution.CLAUDE, distribution.CODEX, distribution.KIMI):
+        for variant in (distribution.CLAUDE, distribution.CODEX, distribution.KIMI, distribution.QWEN):
             for name in ('.env', 'skills/sdlc-verify/templates/private.md', 'skills/sdlc-verify/tools/local.py'):
                 path = self.root / variant / name
                 path.write_bytes(b'LOCAL_SECRET_SENTINEL')
         distribution.sync(self.root)
-        for variant in (distribution.CODEX, distribution.KIMI):
+        for variant in (distribution.CODEX, distribution.KIMI, distribution.QWEN):
             manifest = json.loads((self.root / variant / 'manifest.json').read_text(encoding='utf-8'))
             self.assertNotIn('.env', manifest['files'])
         for archive in distribution.package(self.root, revision='test-revision'):
@@ -169,7 +195,8 @@ class DistributionTests(unittest.TestCase):
 
     def test_standalone_package_excludes_unlisted_files(self):
         for variant, archive_name in ((distribution.CODEX, 'agent-sdlc-codex.zip'),
-                                      (distribution.KIMI, 'agent-sdlc-kimi-code.zip')):
+                                      (distribution.KIMI, 'agent-sdlc-kimi-code.zip'),
+                                      (distribution.QWEN, 'agent-sdlc-qwen-code.zip')):
             base = self.root / variant
             (base / '.env').write_bytes(b'LOCAL_SECRET_SENTINEL')
             subprocess.run([sys.executable, str(base / 'package.py')], check=True)
@@ -179,12 +206,12 @@ class DistributionTests(unittest.TestCase):
 
     def test_crlf_sync_survives_lf_checkout(self):
         listing = distribution.inventory(self.root)
-        for name in set(listing['codex'] + listing['claude-code'] + listing['kimi-code']):
+        for name in set(listing['codex'] + listing['claude-code'] + listing['kimi-code'] + listing['qwen-code']):
             path = self.root / name
             if path.exists():
                 path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
         distribution.sync(self.root)
-        for name in listing['kimi-code']:
+        for name in listing['kimi-code'] + listing['qwen-code']:
             path = self.root / name
             if path.exists():
                 self.assertNotIn(b'\r\n', path.read_bytes(), name)

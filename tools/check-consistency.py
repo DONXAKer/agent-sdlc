@@ -234,6 +234,9 @@ CONSUMERS = {
     "gates": lambda: True,
     "axes": lambda: '"axes"' in py_text,
     "axis_outcomes": lambda: all(tok.split(" ")[0] in templates_text for tok in C["axis_outcomes"]),
+    "axis_outcome_patterns": lambda: set(C['axis_outcome_patterns']) == set(C['axis_outcomes']) and
+                                        "axis_outcome_patterns" in py_text,
+    "gate_switches": lambda: "gate_switches" in py_text and "gate_switches" in read('templates/gates.template.md'),
     "gate_statuses": lambda: "/".join(C["gate_statuses"]) in templates_text,
     "claim_statuses": lambda: "/".join(C["claim_statuses"]) in templates_text,
     "actions": lambda: '"actions"' in py_text and " / ".join(C["actions"]) in templates_text,

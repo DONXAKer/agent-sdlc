@@ -79,6 +79,29 @@ def readiness_ok(readiness, n):
     return bool(re.match(rf'^(?:✅\s*)?{READY_WORD}(?:[.!]|\s+[{READY_SEPARATORS}]\s+\S.*)?$', value))
 
 
+def dictionary_value(value):
+    """Нормализуй оформление словарного значения без изменения его смысла."""
+    return re.sub(r'\s+', ' ', re.sub(r'[*_`]', '', value.casefold().replace('ё', 'е'))).strip()
+
+
+def gate_switch(value):
+    """Верни словарный переключатель либо None для неизвестного значения."""
+    value = dictionary_value(value)
+    for token in CONSTANTS['gate_switches']['values']:
+        if re.fullmatch(re.escape(token) + r'(?:\s+[—–-]\s+\S.*)?', value):
+            return token
+    return None
+
+
+def axis_outcome_kind(value):
+    """Определи вид исхода по единому словарю; адресата проверяет flow-verdict."""
+    value = dictionary_value(value)
+    for kind, pattern in CONSTANTS['axis_outcome_patterns'].items():
+        if re.fullmatch(pattern, value):
+            return kind
+    return None
+
+
 def preparation_checks(intent, plan, readiness, small=False):
     """Один контракт формы и mapping для раннего и итогового этапов."""
     rows = [line for line in (intent or '').splitlines() if re.match(r'^\|\s*claim-\d+\b[^|]*\|', line)]
@@ -98,7 +121,8 @@ def preparation_checks(intent, plan, readiness, small=False):
                        'полный контур: ≥3 пунктов, ≥2 [edge]', 'недостаточно строк или граничных случаев'))
     for n in (1, 2):
         checks.append((readiness_ok(readiness, n), f'readiness: прогон {n} — «готова»',
-                       f'вердикт: {readiness_verdict(readiness, n) or "отсутствует"}'))
+                       f'вердикт: {readiness_verdict(readiness, n) or "отсутствует"}; '
+                       f'ожидается: {READY_WORD} или {READY_WORD} — пояснение'))
     return checks
 
 
@@ -108,6 +132,17 @@ def sha256(text: str) -> str:
 
 def read(path: Path, default=None):
     return path.read_text(encoding="utf-8", errors="replace") if path.exists() else default
+
+
+def defect_class_value(value):
+    """Сними внешнее оформление класса, сохрани внутреннюю пунктуацию имени."""
+    value = value.strip()
+    for _ in range(3):
+        match = re.fullmatch(r'(\*\*|__|`|\*|_)(.+)\1', value)
+        if not match:
+            break
+        value = match.group(2).strip()
+    return re.sub(r'\s+', ' ', value.casefold().replace('ё', 'е'))
 
 
 def defect_class_catalog(gates_text=''):
@@ -125,7 +160,8 @@ def defect_class_catalog(gates_text=''):
                 errors.append('Класс проекта объявляется строкой «- `имя` — YYYY-MM-DD»: ' + line.strip())
                 continue
             name = (match.group(1) or match.group(2)).strip()
-            if not name or name in canonical or name in aliases or name in project:
+            existing = {defect_class_value(item) for item in canonical | set(aliases) | project}
+            if not name or defect_class_value(name) in existing:
                 errors.append('Неоднозначное или повторное имя класса проекта: ' + name)
                 continue
             project.add(name)
@@ -137,12 +173,15 @@ def defect_class_name(value, catalog):
     raw = (value or '').strip()
     if raw.strip('*`_').strip().casefold() in {'', 'н/п', 'нет', 'не применимо', 'none', 'n/a', '-'}:
         return None, None
-    name = raw
-    if name in catalog['canonical'] | catalog['project']:
-        return name, None
-    if name in catalog['aliases'] and catalog['aliases'][name] in catalog['canonical']:
-        return catalog['aliases'][name], None
-    return name, f'Неизвестный класс дефекта «{name}»: выбери канонический класс или объяви его в наборе проекта'
+    normalized = defect_class_value(raw)
+    names = {defect_class_value(name): name for name in catalog['canonical'] | catalog['project']}
+    if normalized in names:
+        return names[normalized], None
+    aliases = {defect_class_value(alias): name for alias, name in catalog['aliases'].items()}
+    if normalized in aliases and aliases[normalized] in catalog['canonical']:
+        return aliases[normalized], None
+    expected = ', '.join(sorted(catalog['canonical'] | catalog['project']))
+    return raw, f'Неизвестный класс дефекта «{raw}»: ожидается {expected}; проектный класс объяви в наборе проекта'
 
 
 # ---------------------------------------------------------------- план и набор
@@ -173,7 +212,7 @@ def gate_rows(gates_text: str):
 
 
 def enabled(on_cell: str) -> bool:
-    return bool(re.match(r"да(?!\w)", on_cell.strip()))
+    return gate_switch(on_cell) == CONSTANTS['gate_switches']['enabled']
 
 
 def gate_configuration_errors(text: str, root=None, slug=None):
@@ -204,8 +243,9 @@ def gate_configuration_errors(text: str, root=None, slug=None):
         if not any(row[0] == name for row in rows):
             errors.append((name, 'Обязательный гейт отсутствует в наборе'))
     for name, on, _, _ in rows:
-        if not re.match(r'^(?:да|нет)(?!\w)', on) or re.search(r'\b(?:да\s*/\s*нет|нет\s*/\s*да)\b', on):
-            errors.append((name, f'Неизвестное значение «Вкл»: {on!r}; укажи «да» или «нет»'))
+        if gate_switch(on) is None:
+            expected = ', '.join(CONSTANTS['gate_switches']['values'])
+            errors.append((name, f'Неизвестное значение «Вкл»: {on!r}; ожидается: {expected}'))
         elif name in MANDATORY_GATES and not enabled(on):
             errors.append((name, 'Обязательный гейт нельзя выключить'))
         elif not enabled(on):

@@ -29,7 +29,8 @@ from sdlc_common import (  # noqa: E402  — константы и разбор:
     ACTIONS, AXES, CHUNK_FILES, CHUNK_LINES, CONSTANTS, DEFAULT_BUDGET as _DEFAULT_BUDGET,
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
     gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path, preparation_checks,
-    readiness_verdict, readiness_ok, diffstat, defect_class_catalog, defect_class_name,
+    readiness_verdict, readiness_ok, diffstat, defect_class_catalog, defect_class_name, axis_outcome_kind,
+    enabled as switch_enabled, gate_rows, dictionary_value,
 )
 import snapshot_base
 import chunk_preconditions
@@ -48,7 +49,6 @@ _ACT = "|".join(re.escape(a) for a in ACTIONS)
 ACTION_RE = re.compile(r"\*\*action:\*\*\s*(" + _ACT + r")\b(?!\s*/\s*(?:" + _ACT + r"))", re.M)
 # «да» с человеческим комментарием («да (с 2026-08)», «да, см. журнал») — тоже включён:
 # жёсткое «ровно да» молча выводило бы такой гейт из-под сверки. (?!\w) отсекает слова на «да…»
-ENABLED_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да(?!\w)[^|]*\|\s*этап 6\s*\|", re.M)
 MANDATORY_ROW = re.compile(r"^\|\s*([^|]+?)\s*\|\s*да — минимум(?!\w)[^|]*\|", re.M)
 
 
@@ -751,12 +751,12 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     # --- 6. Гейты: минимум включён; включённые «этап 6» имеют строку в отчёте -------------------
     if gates:
         for g in mandatory_gates(gates):
-            v.check(bool(re.search(
-                        rf"^\|\s*{re.escape(g)}\s*\|\s*да(?!\w)[^|]*\|", gates, flags=re.M)),
+            v.check(any(name == g and switch_enabled(on) for name, on, _, _ in gate_rows(gates)),
                     f"минимум: «{g}» включён", "строки нет или в ней не «да» / «да — минимум»",
                     "обязательный минимум выключен среди витка — набор не собран")
     if gates and last_report:
-        enabled = [m.strip() for m in ENABLED_ROW.findall(gates)]
+        enabled = [name for name, on, stage, _ in gate_rows(gates)
+                   if stage == 'этап 6' and switch_enabled(on)]
         header = next((ln for ln in last_report.splitlines() if "Набор гейтов:" in ln), "")
         _m = re.search(r"(\d{4}-\d{2}-\d{2})", header)
         report_gates_date = _m.group(1) if _m else None
@@ -766,9 +766,11 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
         enabled_rows = {}
         # «нет → да — минимум» (включение сразу в минимум) — тоже включение: [^|]* после «да»
         for m in re.finditer(
-                r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([^|]+?)\s*\|[^|]*→\s*да(?!\w)[^|]*\|\s*([^|]*)\|",
+                r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([^|]+?)\s*\|[^|]*→\s*([^|]*)\|\s*([^|]*)\|",
                 gates, flags=re.M):
-            g, date, reason = m.group(2).strip(), m.group(1), m.group(3)
+            if not switch_enabled(m.group(3)):
+                continue
+            g, date, reason = m.group(2).strip(), m.group(1), m.group(4)
             if date >= enabled_rows.get(g, ("", ""))[0]:
                 enabled_rows[g] = (date, reason)
         for g in enabled:
@@ -830,7 +832,8 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     # --- 8. Разбор последствий: строка на каждую ось, адресат каждого исхода существует ------------
     # SDLC.md → этап 4: «Адресат исхода обязан существовать … Проверка механическая» — до этой
     # секции обещание держалось прозой: шесть осей закрывались «claim-99» и «гейт «Такого нет»».
-    if gates and plan and intent and re.search(r"^\|\s*Разбор последствий\s*\|\s*да(?!\w)", gates, re.M):
+    if gates and plan and intent and any(name == 'Разбор последствий' and switch_enabled(on)
+            for name, on, _, _ in gate_rows(gates)):
         section = next((s_ for s_ in md_sections(plan) if s_.startswith("Последствия шагов")), "")
         # две таблицы секции различаются заголовком, а не порядком: «| Ось | Затронута шагами |»
         # и «| Ось | Риск словами |»
@@ -862,31 +865,30 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
         for axis, r in axis_rows.items():
             raw = r[3] if len(r) > 3 else ""
             outcome = strip_literal_spans(raw).strip()
-            low = outcome.lower()
-            if re.search(r"\bclaim-\d+\b", raw):
-                for cid in sorted(claims_in(raw)):
+            kind = axis_outcome_kind(raw)
+            if kind is None and raw.strip().casefold() == 'н/п':
+                problems.append(f"{axis}: «н/п» без причины")
+            elif kind is None:
+                expected = ', '.join(CONSTANTS['axis_outcomes'])
+                problems.append(f"{axis}: исход «{outcome[:40]}» вне словаря; ожидается: {expected}")
+            elif kind == "claim-N":
+                for cid in sorted(claims_in(dictionary_value(raw))):
                     if cid not in ci:
                         problems.append(f"{axis}: {cid} нет в задаче")
-            elif low.startswith("гейт"):
+            elif kind == 'гейт «имя»':
                 m = re.search(r"«([^»]+)»", raw)
                 name = m.group(1) if m else ""
-                if not name or not re.search(rf"^\|\s*{re.escape(name)}\s*\|\s*да(?!\w)", gates, re.M):
+                if not name or not any(g == name and switch_enabled(on) for g, on, _, _ in gate_rows(gates)):
                     problems.append(f"{axis}: гейт «{name}» не включён в наборе")
-            elif low.startswith("следующий виток"):
+            elif kind == "следующий виток":
                 if not open_q:
                     problems.append(f"{axis}: «следующий виток» без открытого неблокирующего вопроса в задаче")
-            elif low.startswith("риск"):
+            elif kind == "риск":
                 if axis not in risk_axes:
                     problems.append(f"{axis}: «риск» без строки в таблице принятых рисков")
-            elif low.startswith("инвариант"):
+            elif kind == "инвариант":
                 if not has_invariant:
                     problems.append(f"{axis}: «инвариант» при пустой секции «Инварианты» задачи")
-            elif low.startswith("н/п"):
-                # причина — по сырой ячейке: «н/п — «ось не затронута»» законна, en-dash тоже
-                if not re.search(r"н/п\s*[—–-]\s*\S", raw.strip()):
-                    problems.append(f"{axis}: «н/п» без причины")
-            else:
-                problems.append(f"{axis}: исход «{outcome[:40]}» вне словаря")
         v.check(not problems, "разбор последствий: адресаты исходов существуют",
                 "; ".join(problems),
                 "исход без адресата — то же ключевое слово вместо решения (SDLC.md → этап 4)")

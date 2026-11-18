@@ -206,6 +206,14 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
 def baseline_mode(root: Path, slug: str, n: str) -> int:
     import hashlib
     d = root / ARTIFACTS_DIR / slug
+    # После prepare квитанция пинит sha256 baseline. Повторная съёмка (модель зовёт
+    # `baseline` «на всякий случай») перезаписывает файл и ломает pin — be-foundation-r3/r4.
+    receipt = d / f".chunk-{n}-preconditions.json"
+    if receipt.is_file():
+        raise SystemExit(
+            f"квитанция {receipt.name} уже есть — baseline после prepare заморожен; "
+            "пересъёмка ломает pin («Baseline изменён после подготовки»)"
+        )
     status = git_out(["status", "--porcelain", "--untracked-files=all", "--", ".", f":(exclude){ARTIFACTS_DIR}"], root)
     if status is None:
         raise SystemExit("git status не выполнился — база chunk'а не снята")

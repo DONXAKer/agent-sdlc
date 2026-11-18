@@ -30,7 +30,7 @@
     "skills/sdlc-verify/templates/plan.template.md": "e0ab482fc69ad7f24b0da62b31ec02b5a69730d921f38259318b4ff68ad31261",
     "skills/sdlc-verify/templates/readiness.template.md": "6a41849ef2a7b37051b0043d938cbd4529d1ea353de108a9ea281738adda9994",
     "skills/sdlc-verify/templates/verification-report.template.md": "f36f3bcb80e937d2c13471fdce4275ea368209256b0bf36fe9528e2e878a58c6",
-    "skills/sdlc-verify/tools/attempt-evidence.py": "82015be078619226faecaab4dc4518c83e08e53887d001c6fe512ae6b2e63273",
+    "skills/sdlc-verify/tools/attempt-evidence.py": "77a5ae0a2eb1925512f5a5e6e2ac8851be05179746c81d86c50bd54bbdbac0f0",
     "skills/sdlc-verify/tools/base-check.py": "de57caa79c64a6e9d8b4e8a90745e446b7367d569269cb926177097dfa2df98e",
     "skills/sdlc-verify/tools/chunk_preconditions.py": "2e79d0b3c1f67ba495d209c9241199d3e809680fa806db45b53ebebebe5019e9",
     "skills/sdlc-verify/tools/flow-verdict.py": "5895b2275e96e210d45ba579c813f7c95047885f7c1ae1feafb60dfd98129062",

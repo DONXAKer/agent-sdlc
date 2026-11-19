@@ -90,8 +90,8 @@ class ScaffoldTests(unittest.TestCase):
         plan = (self.d / "plan.md").read_text(encoding="utf-8")
         self.assertRegex(plan, r"\*\*База:\*\* [0-9a-f]{40}")
         self.assertIn("отчёт разведки нет", plan)
-        self.assertIn("| claim-1 | ‹тест / место в коде› |", plan)
-        self.assertIn("| claim-2 | ‹тест / место в коде› |", plan)
+        self.assertIn("| claim-1 | ‹исполняемая / статическая: процедура → ожидаемое наблюдение› |", plan)
+        self.assertIn("| claim-2 | ‹исполняемая / статическая: процедура → ожидаемое наблюдение› |", plan)
         for ax in CONST["axes"]:
             self.assertIn(f"| {ax} |", plan)
         self.assertIn("**Одобрение:** ‹имя› · ‹дата›", plan)  # поле решения человека не тронуто

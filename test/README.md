@@ -122,7 +122,7 @@ TaskLoop означает только готовность к ревью; hando
 (`attempt-gap`, `gates-placeholder`, `passed-table-mismatch` — по находкам живых витков), зелёный
 эталон `green`, по кейсу на ветку вердикта (`plan-unapproved`, `skip-unexcused`, `sdlc-in-scope`,
 `gate-enabled-after-report`, `chunk-oversize`, `axes-outcome-dangling`, `axes-quoted-reason`,
-`review-md-ignored`), два кейса режима `--at handoff` (`handoff-green`, `handoff-two-loops`) и
+`review-md-ignored`, `verification-claims-mismatch`), два кейса режима `--at handoff` (`handoff-green`, `handoff-two-loops`) и
 `example` — канонический пример репозитория, который не копируется в корпус, а материализуется из
 `example/` через `case.json` (`{"mode", "source", "slug"}`; `mode` — verify|handoff, `source` —
 каталог с плоскими артефактами). Что корпус НЕ ловит, показывает

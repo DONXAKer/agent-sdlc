@@ -267,6 +267,23 @@ def claims_in(text):
     return _claims_in(text)
 
 
+def acceptance_claim_errors(report, expected):
+    section = next((part for part in md_sections(report or '') if part.startswith('1. Пункты приёмки')), '')
+    ids = [match.group(1) for line in section.splitlines()
+           if (match := re.match(r'^\|\s*(claim-\d+)\b[^|]*\|', line))]
+    repeated = sorted(cid for cid in set(ids) if ids.count(cid) > 1)
+    unknown = sorted(set(ids) - set(expected))
+    missing = sorted(set(expected) - set(ids))
+    problems = []
+    if repeated:
+        problems.append('повторные ID: ' + ', '.join(repeated))
+    if unknown:
+        problems.append('неизвестные ID: ' + ', '.join(unknown))
+    if missing:
+        problems.append('отсутствуют ID: ' + ', '.join(missing))
+    return problems
+
+
 # ---------------------------------------------------------------- --print для оркестраторов
 
 def do_print(what: str, root: Path, slug: str) -> int:
@@ -740,9 +757,10 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     # --- 5. Claims сквозные + структура листа --------------------------------------------------
     if intent and plan and last_report:
         ci, cr = claims_in(intent), claims_in(last_report)
-        v.check(ci == cr, "claims intent == verification",
-                f"разница: {sorted(ci ^ cr)}",
-                "отчёт приёмки не покрывает лист 1:1")
+        claim_problems = acceptance_claim_errors(last_report, ci)
+        v.check(ci == cr and not claim_problems, "claims intent == verification",
+                f"разница: {sorted(ci ^ cr)}" + (('; ' + '; '.join(claim_problems)) if claim_problems else ''),
+                "отчёт приёмки не покрывает лист 1:1; каждый ID должен встречаться ровно один раз")
     if intent and plan and readiness:
         for ok, name, detail in preparation_checks(intent, plan, readiness,
                                                   chunk_preconditions.contour(intent) == 'мелкий'):

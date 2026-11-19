@@ -26,6 +26,26 @@ spec.loader.exec_module(review_validator)
 
 
 class OpenIssueTests(fixtures.ContextEvidenceTests):
+    def test_chunk_commands_reuse_verified_evidence_tool(self):
+        skill = (ROOT / 'implementations/claude-code/skills/sdlc-chunk/SKILL.md').read_text(encoding='utf-8')
+        body = skill.split('Зафиксируй путь совместимой копии как `<attempt-evidence>`', 1)[1]
+        self.assertNotIn('python ~/.claude/skills/sdlc-verify/tools/attempt-evidence.py', body)
+        for mode in ('compare', 'snapshot', 'baseline', 'prepare', 'write'):
+            self.assertIn(f'python <attempt-evidence> {mode}', body)
+
+    def test_verify_acceptance_rows_are_unique_and_known_in_both_contours(self):
+        for contour, claims in (('полный', ('claim-1', 'claim-2')), ('мелкий', ('claim-1',))):
+            with self.subTest(contour=contour):
+                rows = ['## 1. Пункты приёмки'] + [f'| {cid} | Поведение | ⚠ | нет результата процедуры | чинить |'
+                                                  for cid in claims]
+                self.assertEqual(flow.acceptance_claim_errors('\n'.join(rows), set(claims)), [])
+                rows.insert(2, '| claim-1 | Повтор | ✅ | app.py | н/п |')
+                rows.append('| claim-99 | Несогласованный сценарий | ✅ | app.py | н/п |')
+                problems = flow.acceptance_claim_errors('\n'.join(rows), set(claims))
+                self.assertIn('повторные ID: claim-1', problems)
+                self.assertIn('неизвестные ID: claim-99', problems)
+                self.assertFalse(any('⚠' in problem for problem in problems))
+
     def test_prepare_rejects_missing_mapping_and_invalid_forms_in_both_modes(self):
         for kind in ('git', 'snapshot'):
             for broken in ('mapping', 'unknown', 'list', 'missing_verdict', 'negative_verdict', 'abbreviated'):

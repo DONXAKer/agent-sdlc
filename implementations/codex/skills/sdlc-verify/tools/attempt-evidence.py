@@ -5,6 +5,11 @@ SDLC.md → «Свидетельства производит программа
 тестов — улики, по которым этап 6 судит этап 5; пока их пишет тот, чью работу они удостоверяют,
 вопрос лишь в том, когда их подделают (измерено: «PASS ✓» без единого запуска тестов).
 
+Проверка совместимости (до Chunk):
+  python attempt-evidence.py --version
+    JSON: tool, version и capabilities. Для snapshot-плана требуются возможности snapshot и prepare.
+    Старая копия без этого вызова либо без нужных возможностей несовместима; Git-режим не является fallback.
+
 Режим записи (этап 5, Phase 5 /sdlc-chunk):
   python attempt-evidence.py write <корень> <slug> <n> <k> [--tests-cmd "<команда>"]
                                    [--executor-model <имя>] [--force]
@@ -75,6 +80,7 @@ import profile_guard
 
 TOOL = "attempt-evidence.py"
 VERSION = 2
+CAPABILITIES = ("baseline", "compare", "git", "preflight", "prepare", "run-gate", "snapshot", "verify", "write")
 
 
 def write_bytes_text(path: Path, text: str):
@@ -286,6 +292,9 @@ def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
 
 def main() -> int:
     argv = sys.argv[1:]
+    if argv == ['--version']:
+        print(json.dumps({'tool': TOOL, 'version': VERSION, 'capabilities': list(CAPABILITIES)}, ensure_ascii=False))
+        return 0
     # старые формы: `--verify …`, `--compare …`, `<root> <slug> <n> <k>` без подкоманды
     if argv and argv[0] == "--verify":
         argv = ["verify"] + argv[1:]

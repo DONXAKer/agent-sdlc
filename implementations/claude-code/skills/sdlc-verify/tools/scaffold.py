@@ -141,8 +141,9 @@ def fill(stage: str, root: Path, slug: str, n: str, k: str, run: str) -> str:
         t = sub1(t, r"отчёт разведки ‹да/нет›", "отчёт разведки " + ("да" if (d / "exploration-report.md").exists() else "нет"))
         t = sub1(t, r"отчёт по вопросам ‹да / шага не было›",
                  "отчёт по вопросам " + ("да" if (d / "clarification-report.md").exists() else "шага не было"))
-        t = replace_row(t, "| claim-1 | ‹тест / место в коде› |",
-                        [f"| {cid} | ‹тест / место в коде› |" for cid, _ in claims(intent)] or ["| claim-1 | ‹тест / место в коде› |"])
+        row = '‹исполняемая / статическая: процедура → ожидаемое наблюдение›'
+        t = replace_row(t, f"| claim-1 | {row} |",
+                        [f"| {cid} | {row} |" for cid, _ in claims(intent)] or [f"| claim-1 | {row} |"])
         if axes_on:
             t = replace_row(t, "| ‹имя оси из канона› |",
                             [f"| {ax} | ‹да/нет› | ‹шаг N: что именно, `путь:символ`› / ‹почему ось не затронута› | "

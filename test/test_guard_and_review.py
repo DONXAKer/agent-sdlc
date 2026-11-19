@@ -143,6 +143,15 @@ class ReviewValidateTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertTrue(any("набор id" in e for e in res["errors"]))
 
+    def test_duplicate_and_unknown_claims_have_explicit_diagnostics(self):
+        r = self.good()
+        r["claims"].append(dict(r["claims"][0]))
+        r["claims"][1]["id"] = "claim-7"
+        rc, res = self.run_validate("```json\n" + json.dumps(r) + "\n```")
+        self.assertEqual(rc, 1)
+        self.assertIn("повторные ID: claim-1", res["errors"])
+        self.assertIn("неизвестные ID: claim-7", res["errors"])
+
     def test_status_vocabulary_matches_schema(self):
         r = self.good()
         r["claims"][0]["status"] = "unverifiable"

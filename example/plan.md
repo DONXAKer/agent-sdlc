@@ -50,17 +50,17 @@
 
 | Пункт | Чем закрывается |
 |---|---|
-| claim-1 | `retryReturns200` + ветка `isReplay()` в контроллере |
-| claim-2 | `retryReturnsSameId` |
-| claim-3 | `retryCreatesNoRow` |
-| claim-4 | `noKeyReturns201` |
-| claim-5 | `noKeyWritesNoKeyRow` + шаг 6 плана |
-| claim-6 | `sameKeyOtherBodyReturns409`, маппинг уже существует |
-| claim-7 | `sameKeyOtherBodyCreatesNoPayment` |
-| claim-8 | `concurrentCreatesOnePayment`, уникальность ключа внутри guard'а |
-| claim-9 | тот же тест, ассерт на код ответа проигравшего |
-| claim-10 | тот же тест, ассерт на `paymentId` проигравшего |
-| claim-11 | `concurrentPublishesEventOnce` — подписчик считает события в гонке |
+| claim-1 | исполняемая: `PaymentIdempotencyIT.retryReturns200` → код ответа ровно `200` |
+| claim-2 | исполняемая: `PaymentIdempotencyIT.retryReturnsSameId` → `paymentId` совпадает с первым ответом |
+| claim-3 | исполняемая: `PaymentIdempotencyIT.retryCreatesNoRow` → `count(payments)` не меняется |
+| claim-4 | исполняемая: `PaymentIdempotencyIT.noKeyReturns201` → код ответа ровно `201` |
+| claim-5 | исполняемая: `PaymentIdempotencyIT.noKeyWritesNoKeyRow` → число строк ключей не меняется |
+| claim-6 | исполняемая: `PaymentIdempotencyIT.sameKeyOtherBodyReturns409` → код ответа ровно `409` |
+| claim-7 | исполняемая: `PaymentIdempotencyIT.sameKeyOtherBodyCreatesNoPayment` → `count(payments)` не меняется |
+| claim-8 | исполняемая: `PaymentIdempotencyIT.concurrentCreatesOnePayment` → создан ровно один платёж |
+| claim-9 | исполняемая: `PaymentIdempotencyIT.concurrentCreatesOnePayment` → проигравший получает `200` |
+| claim-10 | исполняемая: `PaymentIdempotencyIT.concurrentCreatesOnePayment` → `paymentId` проигравшего равен `paymentId` победителя |
+| claim-11 | исполняемая: `PaymentIdempotencyIT.concurrentPublishesEventOnce` → перехвачено ровно одно событие |
 
 - **Уходит следующим chunk'ам:** нет — этот chunk закрывает все пункты
 

@@ -59,6 +59,15 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return self.d / f'chunk-1-attempt-{k}-diff.patch'
 
+    def test_version_declares_snapshot_and_prepare_capabilities(self):
+        result = self.tool('attempt-evidence.py', '--version')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        contract = json.loads(result.stdout)
+        self.assertEqual(contract['tool'], 'attempt-evidence.py')
+        self.assertIsInstance(contract['version'], int)
+        self.assertLessEqual({'snapshot', 'prepare'}, set(contract['capabilities']))
+        self.assertFalse(list(self.d.glob('chunk-*')))
+
     def test_dirty_layers_scope_untracked_and_crlf_roundtrip(self):
         (self.root / 'app.py').write_bytes(b'answer = 10\r\n')
         (self.root / 'foreign.txt').write_bytes(b'foreign\r\n')

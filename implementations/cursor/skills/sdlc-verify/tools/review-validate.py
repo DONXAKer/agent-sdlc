@@ -107,8 +107,16 @@ def validate(review, intent_claims: set, paths: set, primary_paths=None, artifac
             errors.append(f"{cid}: remediation не строка")
         c.setdefault("remediation", "")
     valid_ids = [i for i in ids if i]
-    if set(valid_ids) != intent_claims or len(valid_ids) != len(set(valid_ids)) or len(valid_ids) != len(ids):
-        errors.append(f"набор id не совпадает с задачей: ответ {sorted(valid_ids)} ↔ задача {sorted(intent_claims)}")
+    repeated = sorted(cid for cid in set(valid_ids) if valid_ids.count(cid) > 1)
+    unknown = sorted(set(valid_ids) - intent_claims)
+    missing = sorted(intent_claims - set(valid_ids))
+    if repeated:
+        errors.append('повторные ID: ' + ', '.join(repeated))
+    if unknown:
+        errors.append('неизвестные ID: ' + ', '.join(unknown))
+    if missing or len(valid_ids) != len(ids):
+        errors.append(f"набор id не совпадает с задачей: ответ {sorted(valid_ids)} ↔ задача {sorted(intent_claims)}; "
+                      f"отсутствуют: {missing}")
     for field, kinds in KINDS.items():
         items = review.get(field)
         if items is None:

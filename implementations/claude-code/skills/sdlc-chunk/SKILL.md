@@ -27,6 +27,14 @@ git diff + вывод тестов`
 останавливайся, отправляй на `/sdlc-plan <slug>`. Одобрение проверяется по полю в файле, а не
 по памяти сессии: разговорное «да» из прошлой сессии сюда не доезжает.
 
+До начала попытки проверь установленную копию: `python ~/.claude/skills/sdlc-verify/tools/attempt-evidence.py --version`.
+Проверь JSON `capabilities`: для snapshot-плана обязательны `snapshot` и `prepare`.
+Если вызов не поддержан или возможностей нет, не начинай попытку. Обнови копию через `./install.sh` текущей поставки
+либо явно выбери `implementations/claude-code/skills/sdlc-verify/tools/attempt-evidence.py` из проверенного checkout.
+Зафиксируй путь совместимой копии как `<attempt-evidence>` и повтори проверку командой `python <attempt-evidence> --version`.
+Все последующие вызовы в этом chunk выполняй только через `python <attempt-evidence>` той же проверенной копии.
+Не записывай Git-diff для snapshot-плана и не выбирай запасную копию молча.
+
 Определи номер chunk'а: файлов `.sdlc/<slug>/chunk-*-journal.md` ещё нет — это chunk 1. Есть —
 следующий по порядку, если предыдущий закрыт (последний `verification-report-<n>-attempt-*.md`
 с `passed=true` или явным переходом дальше по плану). Предыдущий закрыт, а план не оставляет
@@ -53,7 +61,7 @@ git diff + вывод тестов`
 раздельно и не перезаписываются) — сначала механически:
 
 ```
-python ~/.claude/skills/sdlc-verify/tools/attempt-evidence.py compare <корень проекта> <slug> <n> <K−2> <K−1>
+python <attempt-evidence> compare <корень проекта> <slug> <n> <K−2> <K−1>
 ```
 
 `identical: true` — прогресса нет по построению, останавливайся без вопроса; иначе покажи
@@ -123,11 +131,11 @@ chunk'а» с явным числом его переопределяет. За�
 
 <!-- runner:skip -->
 **Перед первой правкой выбери вид базы в плане.** Для `snapshot` выполни один раз на весь виток:
-`python ~/.claude/skills/sdlc-verify/tools/attempt-evidence.py snapshot <корень проекта> <slug>`.
+`python <attempt-evidence> snapshot <корень проекта> <slug>`.
 Проверь добавленный программой SHA-256 в плане. Не пересоздавай снимок между chunk и попытками.
 Снимок сохраняет исходные dirty-байты и отделяет текущий слой правок того же файла.
 Для `git` действует прежний порядок. **Сними базу chunk'а** инструментом, не руками:
-`python ~/.claude/skills/sdlc-verify/tools/attempt-evidence.py baseline <корень проекта> <slug> <n>`
+`python <attempt-evidence> baseline <корень проекта> <slug> <n>`
 — он пишет `.sdlc/<slug>/.chunk-<n>-baseline.json` (путь → sha256 байтов, единственный формат,
 который читает гейт scope) и печатает список чужих незакоммиченных файлов. Дерево грязное чужими
 правками — назови их человеку одной строкой и спроси, чинить дерево или продолжать с базой:
@@ -138,7 +146,7 @@ chunk'а» с явным числом его переопределяет. За�
 первую попытку chunk'а, не на каждую.
 
 До реализации сохрани отчёт locator внутри витка и выполни:
-`python ~/.claude/skills/sdlc-verify/tools/attempt-evidence.py prepare <корень проекта> <slug> <n> --locator <имя отчёта>`.
+`python <attempt-evidence> prepare <корень проекта> <slug> <n> --locator <имя отчёта>`.
 До prepare создай журнал chunk. Программа сохраняет начальную редакцию журнала и закрепляет её хэш в квитанции.
 Дополняй рабочий журнал. Начальную редакцию не изменяй. Поздний журнал сохрани как отклонение порядка.
 Программа создаёт неизменяемую `.chunk-<n>-preconditions.json` и при необходимости baseline.
@@ -203,7 +211,7 @@ scope. Останавливайся и говори прямо: виток на�
 
 <!-- runner:skip -->
 ```
-python ~/.claude/skills/sdlc-verify/tools/attempt-evidence.py write <корень проекта> <slug> <n> <k> --executor-model <твоя модель>
+python <attempt-evidence> write <корень проекта> <slug> <n> <k> --executor-model <твоя модель>
 ```
 
 `--executor-model` — самоотчёт: назови модель, на которой работаешь (haiku/sonnet/opus/fable),

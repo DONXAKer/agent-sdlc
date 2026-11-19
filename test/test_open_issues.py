@@ -435,5 +435,94 @@ class ReadinessVerdictDictionaryTests(unittest.TestCase):
         self.assertFalse(readiness_ok('## Прогон 1\n- **Дата:** 2026-11-16\n', 1))
 
 
+class MethodologyPracticeTests(unittest.TestCase):
+    """#79–#82: общие определения PDSA, вариации, андон/Кано и переноса уроков."""
+
+    def setUp(self):
+        self.constants = json.loads((ROOT / 'sdlc-constants.json').read_text(encoding='utf-8'))
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+        self.guided = (ROOT / 'profiles/guided.md').read_text(encoding='utf-8')
+
+    def test_prediction_calibration_has_three_outcomes_and_does_not_change_verdict(self):
+        self.assertEqual(self.constants['prediction_outcomes'], {
+            'fulfilled': 'сбывшийся', 'not_fulfilled': 'несбывшийся', 'unmeasured': 'не измерено'})
+        for text in (self.sdlc, self.guided):
+            self.assertIn('`passed=true`', text)
+            self.assertIn('`passed=false`', text)
+            self.assertIn('той же редакции требований и кода', text)
+            self.assertIn('не меняет `passed` и `action`', text)
+        self.assertIn('сбывшиеся / (сбывшиеся + несбывшиеся)', self.guided)
+        self.assertIn('Пустой знаменатель означает `не измерено`', self.guided)
+        self.assertIn('Прогноз без проверки не считай ни сбывшимся, ни несбывшимся', self.guided)
+
+    def test_stability_uses_explicit_p_chart_minimum_and_recorded_series(self):
+        self.assertEqual(self.constants['stability_states'], ['годна', 'не годна', 'нестабильна'])
+        chart = self.constants['p_chart']
+        self.assertEqual(chart, {'minimum_n': 20, 'subgroup_size': 1,
+                                 'control_limit_sigmas': 3, 'one_side_run_length': 8})
+        self.assertIn('**20 измеримых прогонов**', self.sdlc)
+        self.assertIn('`nᵢ=1`', self.sdlc)
+        self.assertIn('`p̄ ± 3 · √(p̄ · (1 − p̄) / nᵢ)`', self.sdlc)
+        self.assertIn('Восемь точек подряд', self.sdlc)
+        self.assertIn('`blocked_env` и андон не входят в знаменатель', self.sdlc)
+        self.assertIn('зелёный после красного не сохраняется', self.sdlc)
+        self.assertIn('При меньшем `n` состояние стабильности не присваивай', self.sdlc)
+        self.assertNotIn('Контрольные карты и Six Sigma здесь не применяются', self.sdlc)
+
+    def test_andon_and_kano_preserve_scope_gates_and_human_attention(self):
+        self.assertEqual(self.constants['andon'], {
+            'action': 'andon', 'outcome': 'честная остановка',
+            'consumes_repair_budget': False, 'model_failure': False})
+        self.assertEqual(self.constants['kano_classes']['values'], ['must-be', 'performance', 'delighters'])
+        intent = (ROOT / 'templates/intent.template.md').read_text(encoding='utf-8')
+        handoff = (ROOT / 'templates/handoff.template.md').read_text(encoding='utf-8')
+        self.assertIn('| Класс Кано |', intent)
+        self.assertIn('| performance |', intent)
+        self.assertIn('Предложения ИИ относятся к `delighters`', intent)
+        self.assertIn('**честная остановка**', handoff)
+        self.assertIn('не расходует бюджет ремонтов, не является отказом модели', handoff)
+        example_handoff = (ROOT / 'example/handoff.md').read_text(encoding='utf-8')
+        self.assertIn("виток продолжается\n  следующей попыткой chunk'а 1\n- **Андон:** н/п", example_handoff)
+        self.assertIn('Нельзя скрывать исключения `must-be` ради снижения метрики human-required', self.sdlc)
+        self.assertIn('не устанавливает `passed=true`, не обходит гейты', self.sdlc)
+        self.assertIn('не расширяет приёмку и scope', self.sdlc)
+
+    def test_a3_requires_systemic_cause_and_yokoten_on_unrelated_task(self):
+        template = (ROOT / 'templates/retro-a3.template.md').read_text(encoding='utf-8')
+        for heading in ('## Фон', '## Текущее состояние', '## Цель',
+                        '## Анализ: пять почему до системной причины',
+                        '## Контрмеры и план', '## Проверка переноса (ёкотэн)', '## Реестр уроков'):
+            self.assertIn(heading, template)
+        for n in range(1, 6):
+            self.assertIn(f'**Почему {n}:**', template)
+        self.assertIn('класс дефекта → системная корневая причина → контрмера', template)
+        self.assertIn('Несвязанная задача', template)
+        self.assertIn('открыт / перенесён', template)
+        self.assertIn('legacy-no-change', template)
+        self.assertIn('legacy-verify-text', template)
+        self.assertIn('**Первый персистентный отчёт серии:**', template)
+        self.assertIn('## Отклонённые находки', template)
+        self.assertIn('Добавь остальные открытые уроки корпуса', template)
+        self.assertIn('не открывай его заново без нового дефекта', template)
+        self.assertIn('не закрывает автоматически прежние задачи', template)
+        for name in ('codex', 'claude-code'):
+            skill = (ROOT / f'implementations/{name}/skills/sdlc-retro/SKILL.md').read_text(encoding='utf-8')
+            self.assertIn('retro-a3.template.md', skill)
+            self.assertIn('несвязанной задаче', skill)
+            self.assertIn('системная корневая', skill)
+            self.assertIn('остальные открытые уроки корпуса', skill)
+            self.assertIn('не открывай', skill.casefold())
+
+    def test_readme_links_only_documented_practices(self):
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        section = readme.split('## Какие подходы применяются', 1)[1].split('## Реализации', 1)[0]
+        for label in ('PDSA', 'SoPK', 'вариации', 'андон', 'A3', 'пять почему', 'Ёкотэн', 'Кано',
+                      'Fagan', 'Синго', 'Теория ограничений', 'ISO/IEC 25010'):
+            self.assertIn(label, section)
+        self.assertIn('(templates/retro-a3.template.md)', section)
+        self.assertIn('(SDLC.md#стабильность-вердиктов-по-сериям)', section)
+        self.assertIn('Six Sigma и формальное соответствие ISO 9001/CMMI проект не заявляет', section)
+
+
 if __name__ == '__main__':
     unittest.main()

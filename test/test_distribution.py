@@ -95,6 +95,28 @@ class DistributionTests(unittest.TestCase):
         self.assertTrue(distribution.sync(self.root, check=True))
         self.assertEqual(original, skill.read_bytes())
 
+    def test_retro_a3_template_is_distributed_to_every_implementation(self):
+        source = self.root / 'templates/retro-a3.template.md'
+        expected = distribution.canonical_bytes(source)
+        copies = [distribution.CLAUDE / 'skills/sdlc-retro/templates/retro-a3.template.md'] + [
+            variant / 'skills/sdlc-verify/templates/retro-a3.template.md'
+            for variant in (distribution.CODEX, distribution.CURSOR, distribution.KIMI,
+                            distribution.OPENCODE, distribution.QWEN)]
+        for relative in copies:
+            with self.subTest(copy=relative.as_posix()):
+                self.assertEqual((self.root / relative).read_bytes(), expected)
+        listing = distribution.inventory(self.root)
+        for variant, key in ((distribution.CODEX, 'codex'), (distribution.CLAUDE, 'claude-code'),
+                             (distribution.KIMI, 'kimi-code'), (distribution.OPENCODE, 'opencode'),
+                             (distribution.QWEN, 'qwen-code')):
+            relative = next(path for path in copies if path.is_relative_to(variant))
+            self.assertIn(relative.as_posix(), listing[key])
+        for variant in (distribution.CODEX, distribution.CURSOR, distribution.KIMI,
+                        distribution.OPENCODE, distribution.QWEN):
+            manifest = json.loads((self.root / variant / 'manifest.json').read_text(encoding='utf-8'))
+            relative = next(path for path in copies if path.is_relative_to(variant))
+            self.assertIn(relative.relative_to(variant).as_posix(), manifest['files'])
+
     def test_removed_source_removes_owned_copy_only(self):
         tool = Path('skills/sdlc-verify/tools/temporary-resource.py')
         (self.root / distribution.CLAUDE / tool).write_text('# Ресурс\n', encoding='utf-8')

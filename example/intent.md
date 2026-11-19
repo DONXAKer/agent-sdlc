@@ -39,19 +39,19 @@
 
 ## Приёмочный лист
 
-| id | Пункт | Как проверить (процедура + критерий) |
-|---|-------|--------------------------------------|
-| claim-1 | Повторный `POST /api/payments` с тем же `Idempotency-Key` и тем же телом возвращает код `200` | `PaymentIdempotencyIT.retryReturns200` — критерий: код ответа ровно `200` |
-| claim-2 | Повторный запрос возвращает `paymentId` первого платежа | `PaymentIdempotencyIT.retryReturnsSameId` — критерий: `paymentId` в ответе равен `paymentId` первого ответа |
-| claim-3 | Повторный запрос не создаёт новую строку в `payments` | `PaymentIdempotencyIT.retryCreatesNoRow` — критерий: `count(payments)` после повтора равен значению до повтора |
-| claim-4 | Запрос без заголовка `Idempotency-Key` возвращает код `201` | `PaymentIdempotencyIT.noKeyReturns201` — критерий: код ответа ровно `201` |
-| claim-5 | `[edge]` Запрос без заголовка не пишет ключей для этого endpoint'а | `PaymentIdempotencyIT.noKeyWritesNoKeyRow` — критерий: число строк таблицы ключей с `endpoint = 'POST /api/payments'` после двух запросов подряд равно значению до них |
-| claim-6 | `[edge]` Тот же `Idempotency-Key` с другим телом возвращает код `409` | `PaymentIdempotencyIT.sameKeyOtherBodyReturns409` — критерий: код ответа ровно `409` |
-| claim-7 | `[edge]` Тот же ключ с другим телом не создаёт платёж | `PaymentIdempotencyIT.sameKeyOtherBodyCreatesNoPayment` — критерий: `count(payments)` не изменился |
-| claim-8 | `[edge]` Два одновременных запроса с одним ключом создают ровно один платёж | `PaymentIdempotencyIT.concurrentCreatesOnePayment` — Given два потока с ключом `K` · When оба шлют запрос одновременно (реальный PostgreSQL) · Then `count(payments) = 1` |
-| claim-9 | `[edge]` Проигравший в гонке поток получает код `200` | тот же тест, второй ассерт — Given два потока с `K` · When первый закоммитился раньше · Then код ответа проигравшего ровно `200` |
-| claim-10 | `[edge]` Проигравший в гонке получает `paymentId` победителя | тот же тест, третий ассерт — критерий: `paymentId` проигравшего равен `paymentId` победителя |
-| claim-11 | `[edge]` При гонке `PaymentCreatedEvent` публикуется ровно один раз | `PaymentIdempotencyIT.concurrentPublishesEventOnce` — Given подписчик-счётчик · When два потока с `K` одновременно · Then перехвачено ровно одно событие с этим `paymentId` |
+| id | Пункт | Как проверить (процедура + критерий) | Класс Кано |
+|---|-------|--------------------------------------|------------|
+| claim-1 | Повторный `POST /api/payments` с тем же `Idempotency-Key` и тем же телом возвращает код `200` | `PaymentIdempotencyIT.retryReturns200` — критерий: код ответа ровно `200` | performance |
+| claim-2 | Повторный запрос возвращает `paymentId` первого платежа | `PaymentIdempotencyIT.retryReturnsSameId` — критерий: `paymentId` в ответе равен `paymentId` первого ответа | performance |
+| claim-3 | Повторный запрос не создаёт новую строку в `payments` | `PaymentIdempotencyIT.retryCreatesNoRow` — критерий: `count(payments)` после повтора равен значению до повтора | performance |
+| claim-4 | Запрос без заголовка `Idempotency-Key` возвращает код `201` | `PaymentIdempotencyIT.noKeyReturns201` — критерий: код ответа ровно `201` | performance |
+| claim-5 | `[edge]` Запрос без заголовка не пишет ключей для этого endpoint'а | `PaymentIdempotencyIT.noKeyWritesNoKeyRow` — критерий: число строк таблицы ключей с `endpoint = 'POST /api/payments'` после двух запросов подряд равно значению до них | performance |
+| claim-6 | `[edge]` Тот же `Idempotency-Key` с другим телом возвращает код `409` | `PaymentIdempotencyIT.sameKeyOtherBodyReturns409` — критерий: код ответа ровно `409` | performance |
+| claim-7 | `[edge]` Тот же ключ с другим телом не создаёт платёж | `PaymentIdempotencyIT.sameKeyOtherBodyCreatesNoPayment` — критерий: `count(payments)` не изменился | performance |
+| claim-8 | `[edge]` Два одновременных запроса с одним ключом создают ровно один платёж | `PaymentIdempotencyIT.concurrentCreatesOnePayment` — Given два потока с ключом `K` · When оба шлют запрос одновременно (реальный PostgreSQL) · Then `count(payments) = 1` | performance |
+| claim-9 | `[edge]` Проигравший в гонке поток получает код `200` | тот же тест, второй ассерт — Given два потока с `K` · When первый закоммитился раньше · Then код ответа проигравшего ровно `200` | performance |
+| claim-10 | `[edge]` Проигравший в гонке получает `paymentId` победителя | тот же тест, третий ассерт — критерий: `paymentId` проигравшего равен `paymentId` победителя | performance |
+| claim-11 | `[edge]` При гонке `PaymentCreatedEvent` публикуется ровно один раз | `PaymentIdempotencyIT.concurrentPublishesEventOnce` — Given подписчик-счётчик · When два потока с `K` одновременно · Then перехвачено ровно одно событие с этим `paymentId` | performance |
 
 _Отдельной колонки Given-When-Then нет: для одношаговых пунктов она пересказывала бы процедуру
 третий раз. Многошаговым сценариям гонки шаги вписаны прямо в «Как проверить»._

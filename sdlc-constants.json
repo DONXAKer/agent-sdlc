@@ -205,6 +205,38 @@
     "blocked_env",
     "escalate"
   ],
+  "prediction_outcomes": {
+    "fulfilled": "сбывшийся",
+    "not_fulfilled": "несбывшийся",
+    "unmeasured": "не измерено"
+  },
+  "stability_states": [
+    "годна",
+    "не годна",
+    "нестабильна"
+  ],
+  "p_chart": {
+    "minimum_n": 20,
+    "subgroup_size": 1,
+    "control_limit_sigmas": 3,
+    "one_side_run_length": 8
+  },
+  "andon": {
+    "action": "andon",
+    "outcome": "честная остановка",
+    "consumes_repair_budget": false,
+    "model_failure": false
+  },
+  "kano_classes": {
+    "values": [
+      "must-be",
+      "performance",
+      "delighters"
+    ],
+    "required": "must-be",
+    "acceptance": "performance",
+    "proposals": "delighters"
+  },
   "human_decision_labels": [
     "Одобрение",
     "Подтвердил",

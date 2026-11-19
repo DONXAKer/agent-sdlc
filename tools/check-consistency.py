@@ -240,6 +240,13 @@ CONSUMERS = {
     "gate_statuses": lambda: "/".join(C["gate_statuses"]) in templates_text,
     "claim_statuses": lambda: "/".join(C["claim_statuses"]) in templates_text,
     "actions": lambda: '"actions"' in py_text and " / ".join(C["actions"]) in templates_text,
+    "prediction_outcomes": lambda: all(value in sdlc and value in read('profiles/guided.md')
+                                       for value in C['prediction_outcomes'].values()),
+    "stability_states": lambda: all(f'`{value}`' in sdlc for value in C['stability_states']),
+    "p_chart": lambda: str(C['p_chart']['minimum_n']) in sdlc and C['p_chart']['minimum_n'] >= 20,
+    "andon": lambda: C['andon']['action'] in sdlc and C['andon']['outcome'] in templates_text,
+    "kano_classes": lambda: all(value in sdlc and value in templates_text
+                                for value in C['kano_classes']['values']),
     "human_decision_labels": lambda: True,
     "defect_actions": lambda: all(a in templates_text for a in C["defect_actions"]),
     "verdict_table": lambda: True,

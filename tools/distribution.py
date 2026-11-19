@@ -30,6 +30,7 @@ TEMPLATES = {
     'clarification-report': ('ask',), 'plan': ('plan',),
     'acceptance-checks': ('plan', 'verify'), 'chunk-journal': ('chunk',),
     'verification-report': ('verify',), 'handoff': ('handoff',),
+    'retro-a3': ('retro',),
 }
 RESOURCE_RECORD = CODEX / 'generated-resources.json'
 

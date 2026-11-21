@@ -524,5 +524,56 @@ class MethodologyPracticeTests(unittest.TestCase):
         self.assertIn('Six Sigma и формальное соответствие ISO 9001/CMMI проект не заявляет', section)
 
 
+class BlockedEnvExternalCriterionTests(unittest.TestCase):
+    """#100: blocked_env разрешён для обязательного критерия на подтверждённо недоступной внешней среде."""
+
+    def setUp(self):
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+
+    def test_mandatory_external_criterion_allows_blocked_env_with_full_diagnostics(self):
+        for fragment in ('Ошибка кода и отсутствие среды требуют разных действий',
+                         'Обязательный claim требует внешней среды',
+                         'Сохрани диагностику среды',
+                         'Укажи непроверенный claim или гейт, первичное свидетельство и условие продолжения',
+                         'Для открытого claim сохрани ⚠ и passed=false',
+                         'Остальные проверки, включая ревью, scope и инварианты, успешны'):
+            self.assertIn(fragment, self.sdlc)
+
+
+class PlanChecksVsProjectGatesTests(unittest.TestCase):
+    """#83: проверки плана и проектные гейты — независимые обязательства; слабое звено роняет вердикт."""
+
+    def setUp(self):
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+        self.plan = (ROOT / 'templates/plan.template.md').read_text(encoding='utf-8')
+        self.report = (ROOT / 'templates/verification-report.template.md').read_text(encoding='utf-8')
+        self.example = (ROOT / 'example/plan-checks-and-gates.md').read_text(encoding='utf-8')
+
+    def test_contract_states_two_independent_obligations_and_weak_link_verdict(self):
+        for fragment in ('два независимых обязательства',
+                         'зелёный гейт не подтверждает пункт и не отменяет его процедуру',
+                         'Итог определяется слабым звеном',
+                         'красная либо отсутствующая проверка плана',
+                         'остаётся\nв `⚠`, опровергнутый — `❌`',
+                         'example/plan-checks-and-gates.md'):
+            self.assertIn(fragment, self.sdlc)
+        self.assertIn('Проверки плана и проектные гейты', self.sdlc)
+        self.assertIn('реальную команду проверки с каталогом её запуска', self.sdlc)
+
+    def test_templates_pin_command_environment_and_result(self):
+        self.assertIn('‹команда проекта› из ‹каталог запуска от корня›', self.plan)
+        for fragment in ('фактически выполненную команду, код возврата и счёт',
+                         'каталог её запуска',
+                         'версия инструмента'):
+            self.assertIn(fragment, self.report)
+
+    def test_example_with_two_stacks_shows_commands_and_acceptance_reasons(self):
+        for fragment in ('ledger-svc', 'cabinet-web',
+                         './tools/gw :ledger-svc:test', 'npm run validate --workspace cabinet-web',
+                         'passed: false', 'passed: true', '11 из 12', '12/12',
+                         'Зелёный гейт другого стека пункт не подтверждает'):
+            self.assertIn(fragment, self.example)
+
+
 if __name__ == '__main__':
     unittest.main()

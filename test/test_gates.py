@@ -206,6 +206,21 @@ class AntiBypassTests(Base):
             self.assertEqual(rc, 1, line)
             self.assertIn("маркер", res["evidence"][0])
 
+    def test_rspec_pending_marker_applies_only_to_ruby_files(self):
+        # #88: переменная pending в JUnit-тесте Java — не маркер RSpec
+        java = self.write_patch({"server/src/test/java/OrdersTest.java": (
+            ["class OrdersTest {}"],
+            ["class OrdersTest {", "@Test",
+             "Integer pending = jdbc.queryForObject(sql, Integer.class, userId);",
+             "Assertions.assertEquals(1, pending);", "}"])})
+        rc, res, _ = run("anti_bypass.py", java, "--test-path", "server/src/test/**/*.java")
+        self.assertEqual((rc, res["status"]), (0, "pass"))
+        # настоящий RSpec pending в .rb по-прежнему обнаруживается
+        rb = self.write_patch({"spec/order_spec.rb": (["x"], ["x", "it('works') { pending }"])})
+        rc, res, _ = run("anti_bypass.py", rb)
+        self.assertEqual(rc, 1)
+        self.assertIn("rspec", res["evidence"][0])
+
     def test_production_code_is_not_scanned_for_markers(self):
         for line in ["Model.objects.exclude(deleted=True)", "stream.skip(1)", "const pending = []",
                      "if status == 'pending':", "docker build --skip-cache"]:

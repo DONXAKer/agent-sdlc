@@ -575,5 +575,31 @@ class PlanChecksVsProjectGatesTests(unittest.TestCase):
             self.assertIn(fragment, self.example)
 
 
+class TerminalEvidenceCheckSeparationTests(unittest.TestCase):
+    """#84: терминальная проверка версии инструмента исключена из промпта управляемого Chunk."""
+
+    def setUp(self):
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+
+    def test_version_check_block_wrapped_in_runner_skip(self):
+        block = ('<!-- runner:skip -->\n'
+                 'До старта Chunk выполни `attempt-evidence.py --version` и проверь JSON `capabilities`.\n'
+                 'Для snapshot-плана обязательны возможности `snapshot` и `prepare`. '
+                 'Старую копию обнови штатным установщиком текущей реализации либо явно выбери '
+                 'совместимую копию из проверенной поставки и повтори проверку.\n'
+                 'Все последующие вызовы инструмента в этом Chunk выполняй той же проверенной копией.\n'
+                 'При отказе проверки остановись с диагностикой. '
+                 'Не заменяй snapshot-план Git-diff и не переходи к непроверенной копии инструмента.\n'
+                 '<!-- /runner:skip -->')
+        self.assertIn(block, self.sdlc)
+
+    def test_managed_chunk_receives_runner_check_state(self):
+        for fragment in ('Runner проверяет версию инструмента свидетельств `attempt-evidence.py` '
+                         'и передаёт её состояние.',
+                         'Получи состояние от Runner и переходи к изменению кода '
+                         'без локального вызова скрипта.'):
+            self.assertIn(fragment, self.sdlc)
+
+
 if __name__ == '__main__':
     unittest.main()

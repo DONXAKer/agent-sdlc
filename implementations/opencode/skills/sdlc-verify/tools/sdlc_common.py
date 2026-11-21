@@ -102,6 +102,51 @@ def axis_outcome_kind(value):
     return None
 
 
+def approval_line(plan: str) -> str:
+    return next((ln for ln in (plan or "").splitlines() if "**Одобрение:**" in ln), "")
+
+
+def plan_approved(plan: str) -> bool:
+    """Одобрение — значащая часть строки до « / »-альтернативы шаблона.
+
+    «Иван · 2026-08-15 / **не одобрен — …**» (не вычищенный хвост заготовки) — одобрен;
+    «не одобрен — вернуться после 2026-08-20» — НЕ одобрен, дата в причине не спасает;
+    «ожидается решение к 2026-08-20» — НЕ одобрен: слово ожидания сильнее даты;
+    «Тест-Оператор · 2026-08-15 · источник: файл ответов» — одобрен.
+    """
+    raw = approval_line(plan).split("**Одобрение:**", 1)[-1]
+    # отрезаем только хвост заготовки «/ не одобрен — …» (болд необязателен, пробелы любые);
+    # слэш внутри значения («Иван / Оператор») не трогаем
+    value = re.split(r"\s*/\s*\*{0,2}не одобрен", raw)[0]
+    # Ненужность повторного решения не отменяет ранее выданные полномочия.
+    value = re.sub(r"(?:отдельное\s+)?повторное\s+согласование\s+не\s+требуется", "", value, flags=re.I)
+    # решение ещё не принято: отрицание или слово ожидания в значении — не одобрение,
+    # даже если рядом стоит дата; сомнение трактуется как «не одобрен» (ложный провал громкий,
+    # ложное «одобрен» пропускало бы неодобренный план молча)
+    if re.search(r"(?<!\w)не\s|ожида|отложен|позже|вернуться|tbd|\?", value, re.I):
+        return False
+    authority = re.search(r"пользовател\w*\s+(?:явно\s+)?(?:поручил|разрешил|делегировал)([^;\n]*)", value, re.I)
+    execution = (r"вести\s+(?:цель|задачи)\b|"
+                 r"(?:выполнить|выполнение|выполнять)\s+(?:текущ\w*\s+)?(?:план\w*|реализаци\w*|задач[уи])\b|"
+                 r"реализовать\s+(?:текущ\w*\s+)?(?:план|задачу|изменения)\b")
+    delegated = (bool(authority and re.search(execution, authority.group(1), re.I))
+                 and not re.search(r"только\s+чтени|изучить|прочитать|исследова|\bаудит|\bанализ", authority.group(1), re.I)
+                 and bool(re.search(r"\$sdlc-run|AGENTS\.md|источник:\s*сообщение", value, re.I)))
+    return bool(re.search(r"20\d\d", value)) or "источник: файл ответов" in value or delegated
+
+
+def size_explained(plan):
+    text = re.sub(r"<!--.*?(?:-->|\Z)|^```[^\n]*\n.*?(?:^```[^\n]*|\Z)", "", plan or "", flags=re.M | re.S)
+    label = "почему этот chunk больше ориентира"
+    field = re.search(rf"^[ \t]*(?:[-*] +)?(?:\*\*)?{label}\**[ \t]*[:—–-]\**[ \t]*(.+)$", text, re.I | re.M)
+    section = re.search(rf"^#{{2,6}} +{label}[ \t]*\n(.*?)(?=^#|\Z)", text, re.I | re.M | re.S)
+    for match in (field, section):
+        reason = match.group(1).strip() if match else ""
+        if reason and PLACEHOLDER not in reason and not re.fullmatch(r"нет|н/п|не указано", reason.rstrip(".!"), re.I):
+            return True
+    return False
+
+
 def preparation_checks(intent, plan, readiness, small=False):
     """Один контракт формы и mapping для раннего и итогового этапов."""
     rows = [line for line in (intent or '').splitlines() if re.match(r'^\|\s*claim-\d+\b[^|]*\|', line)]

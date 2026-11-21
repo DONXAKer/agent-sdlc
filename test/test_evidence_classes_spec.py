@@ -49,6 +49,38 @@ class EvidencePathTests(unittest.TestCase):
         self.assertEqual(review_evidence.prepare(self.root, self.d, 1, 1, manifest), {name})
         return manifest
 
+    def test_extend_package_before_review(self):
+        fixtures.SnapshotTests.snapshot(self)
+        (self.root / 'app.py').write_bytes(b'answer = 2\n')
+        fixtures.SnapshotTests.write(self)
+        measurement = self.d / 'samples.csv'
+        measurement.write_bytes(b'value\n2\n')
+        name = measurement.relative_to(self.root).as_posix()
+        manifest = {'files': [dict(path=name, claims=['claim-1'], kind='fixture', source='Замер',
+                                   revision=review_evidence.candidate(self.root, self.d, 1, 1),
+                                   sha256=snapshot_base.digest(measurement.read_bytes()))]}
+        review_evidence.prepare(self.root, self.d, 1, 1, manifest)
+        first, receipt = review_evidence.paths(self.d, 1, 1)
+        original = first.read_bytes(), receipt.read_bytes()
+        clip = self.d / 'transition.webm'
+        clip.write_bytes(b'\x1aE\xdf\xa3')
+        row = dict(manifest['files'][0], path=clip.relative_to(self.root).as_posix(), kind='video',
+                   sha256=snapshot_base.digest(clip.read_bytes()))
+        stale = dict(row, revision=dict(row['revision'], diff_sha256='0' * 64))
+        with self.assertRaisesRegex(ValueError, 'ревизия'):
+            review_evidence.extend(self.root, self.d, 1, 1, {'files': manifest['files'] + [stale]})
+        manifest['files'].append(row)
+        result = review_evidence.extend(self.root, self.d, 1, 1, manifest)
+        self.assertEqual(result, {name, row['path']})
+        self.assertEqual(original, (first.read_bytes(), receipt.read_bytes()))
+        self.assertEqual(review_evidence.verify(self.root, self.d, 1, 1), result)
+        (self.root / 'app.py').write_bytes(b'answer = 3\n')
+        with self.assertRaisesRegex(ValueError, 'кандидата'):
+            review_evidence.extend(self.root, self.d, 1, 1, manifest)
+        (self.d / 'chunk-1-attempt-1-review.md').touch()
+        with self.assertRaisesRegex(ValueError, 'Ревью'):
+            review_evidence.extend(self.root, self.d, 1, 1, manifest)
+
     def answer(self, proof):
         refs = [{'path': 'app.py', 'anchor': 'answer'}, {'path': proof, 'anchor': 'value'}]
         return {'claims': [{'id': 'claim-1', 'status': 'passed', 'evidence': refs}],

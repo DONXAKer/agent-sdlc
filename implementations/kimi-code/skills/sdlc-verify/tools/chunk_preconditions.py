@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import snapshot_base
-from sdlc_common import files_to_touch, patch_files, read, preparation_checks, artifact_targets
+from sdlc_common import CHUNK_FILES, plan_approved, size_explained, files_to_touch, patch_files, read, preparation_checks, artifact_targets
 
 
 def receipt_path(d, n):
@@ -44,6 +44,11 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
     if problems:
         raise ValueError('; '.join(problems))
     planned = set(files_to_touch(plan))
+    if not plan_approved(plan):
+        raise ValueError('Проверь поле «Одобрение» до prepare')
+    deferred = re.search(r"Уходит следующим chunk.ам:\*\*[^\n]*claim-\d+", plan, re.I)
+    if len(planned) > CHUNK_FILES and not deferred and not size_explained(plan):
+        raise ValueError('Раздели план или укажи: почему этот chunk больше ориентира')
     targets = artifact_targets(root, d)
     if not planned:
         raise ValueError('План не содержит files_to_touch; предусловия не доказаны')

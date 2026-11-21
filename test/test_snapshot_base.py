@@ -35,6 +35,7 @@ class SnapshotTests(unittest.TestCase):
         self.d.mkdir(parents=True)
         self.plan = self.d / 'plan.md'
         self.plan.write_text(f'- **База:** {self.base}\n- **Вид базы:** snapshot\n\n'
+                             '- **Одобрение:** Оператор · 2026-11-09\n'
                              'Покрытие: claim-1.\n'
                              '## files_to_touch\n| Путь | Что делаем |\n|---|---|\n| app.py | правка |\n',
                              encoding='utf-8')

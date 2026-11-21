@@ -1,10 +1,11 @@
 """Побайтовый пакет первичных доказательств. Не вычисляет результат приёмки.
 
 Подготовка: python review_evidence.py <корень> <slug> <N> <K> <manifest.json>
+Дополнение до ревью: python review_evidence.py --extend <корень> <slug> <N> <K> <полный-manifest.json>
 Контекст reviewer: python review_evidence.py --context <корень> <slug> <N> <K>
 evidencePath берётся из manifest.path; archiveMember указывает отдельное транспортное имя ZIP.
 Manifest: {"files": [{"path": "qa/result.json", "claims": ["claim-1"],
-"kind": "observation|stdout|screenshot|sql_trace|fixture", "source": "команда или источник",
+"kind": "observation|stdout|screenshot|video|sql_trace|fixture", "source": "команда или источник",
 "sha256": "64 hex", "revision": {"head_sha": "...", "diff_sha256": "..."}}]}.
 Ревизия закрепляет HEAD и байты патча попытки. Старую ревизию сначала проверь заново.
 Передавай ZIP вместе с квитанцией. ZIP сохраняет исходные CRLF/LF без Git-нормализации.
@@ -14,13 +15,15 @@ import json
 import re
 import sys
 import zipfile
+import tempfile
+import subprocess
 from pathlib import Path
 
 import snapshot_base
 from sdlc_common import claims_in, git_out
 
 KINDS = {'observation': {'.json'}, 'stdout': {'.txt', '.log'},
-         'screenshot': {'.png', '.jpg', '.jpeg', '.webp'}, 'sql_trace': {'.sql', '.json', '.txt'},
+         'video': {'.webm'}, 'screenshot': {'.png', '.jpg', '.jpeg', '.webp'}, 'sql_trace': {'.sql', '.json', '.txt'},
          'fixture': {'.json', '.lua', '.luau', '.csv'}}
 
 
@@ -29,12 +32,27 @@ def candidate(root, d, n, k):
             'diff_sha256': snapshot_base.digest((d / f'chunk-{n}-attempt-{k}-diff.patch').read_bytes())}
 
 
-def paths(d, n, k):
+def edition(d, n, k):
+    current = d
+    number = 1
+    while True:
+        following = d / f'chunk-{n}-attempt-{k}-review-evidence-v{number + 1}'
+        if not following.exists():
+            return current, following
+        if not following.is_dir() or following.is_symlink():
+            raise ValueError('Некорректный каталог редакции пакета')
+        current = following
+        number += 1
+
+
+def paths(d, n, k, storage=None):
+    d = storage or edition(d, n, k)[0]
     stem = f'chunk-{n}-attempt-{k}-review-evidence'
     return d / (stem + '.zip'), d / (stem + '.json')
 
 
-def context_path(d, n, k):
+def context_path(d, n, k, storage=None):
+    d = storage or edition(d, n, k)[0]
     return d / f'chunk-{n}-attempt-{k}-review-evidence-context.json'
 
 
@@ -63,8 +81,9 @@ def checked(root, d, manifest, revision):
         path = snapshot_base.safe_path(root, name)
         if name in result or path.is_symlink() or not path.is_file():
             raise ValueError('Доказательство отсутствует, повторено или является ссылкой')
-        if (item['kind'] not in KINDS or path.suffix.lower() not in KINDS[item['kind']]
-                or re.search(r'(?:^|[/_.-])(?:review|narrative|handoff|verification-report|conversation)(?:[/_.-]|$)', name, re.I)):
+        if item['kind'] not in KINDS or path.suffix.lower() not in KINDS[item['kind']]:
+            raise ValueError('Тип или расширение первичного доказательства не поддерживается')
+        if re.search(r'(?:^|[/_.-])(?:review|narrative|handoff|verification-report|conversation)(?:[/_.-]|$)', name, re.I):
             raise ValueError('Рассказ, прежнее ревью и история не являются первичным доказательством')
         if not isinstance(item['source'], str) or not item['source'].strip():
             raise ValueError('Нет источника получения доказательства')
@@ -93,12 +112,39 @@ def checked(root, d, manifest, revision):
     return result
 
 
-def prepare(root, d, n, k, manifest):
+def extend(root, d, n, k, manifest):
+    """Дополни неизменённый пакет перед ревью. Опубликуй новую редакцию целиком."""
+    if ((d / '.review-lock').exists() or (d / f'.review-validation-{n}-attempt-{k}.json').exists()
+            or any(d.glob(f'chunk-{n}-attempt-{k}-*review*.md'))
+            or (d / f'verification-report-{n}-attempt-{k}.md').exists()):
+        raise ValueError('Ревью уже началось; пакет этой проверки закреплён')
+    command = [sys.executable, str(Path(__file__).with_name('attempt-evidence.py')),
+               'verify', str(root), d.name, str(n), str(k)]
+    run = subprocess.run(command, capture_output=True)
+    if run.returncode or not json.loads(run.stdout)['patch_matches_evidence']:
+        raise ValueError('Рабочее дерево или патч отличается от закреплённого кандидата')
+    current, following = edition(d, n, k)
+    package, _ = paths(d, n, k, current)
+    verify(root, d, n, k, storage=current)
+    with zipfile.ZipFile(package) as archive:
+        previous = json.loads(archive.read('manifest.json'))['files']
+    checked(root, d, manifest, candidate(root, d, n, k))
+    if len(manifest['files']) <= len(previous) or any(item not in manifest['files'] for item in previous):
+        raise ValueError('Сохрани все прежние записи и добавь пропущенные файлы')
+    with tempfile.TemporaryDirectory(dir=d) as temp:
+        stage = Path(temp) / 'package'
+        stage.mkdir()
+        result = prepare(root, d, n, k, manifest, storage=stage)
+        stage.rename(following)
+    return result
+
+
+def prepare(root, d, n, k, manifest, storage=None):
     revision = candidate(root, d, n, k)
     files = checked(root, d, manifest, revision)
-    package, receipt = paths(d, n, k)
-    if package.exists() or receipt.exists() or context_path(d, n, k).exists():
-        raise ValueError('Пакет попытки уже существует; сохрани новую попытку')
+    package, receipt = paths(d, n, k, storage)
+    if package.exists() or receipt.exists() or context_path(d, n, k, storage).exists():
+        raise ValueError('Пакет попытки уже существует. Для дополнения до ревью используй --extend')
     with zipfile.ZipFile(package, 'x', compression=zipfile.ZIP_DEFLATED) as output:
         output.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False).encode('utf-8'))
         for name, raw in files.items():
@@ -107,14 +153,14 @@ def prepare(root, d, n, k, manifest):
            'revision': revision, 'package_sha256': snapshot_base.digest(package.read_bytes())}
     with receipt.open('x', encoding='utf-8') as output:
         json.dump(rec, output, ensure_ascii=False, indent=2)
-    context = verify(root, d, n, k, with_context=True)
-    with context_path(d, n, k).open('x', encoding='utf-8') as output:
+    context = verify(root, d, n, k, with_context=True, storage=storage)
+    with context_path(d, n, k, storage).open('x', encoding='utf-8') as output:
         json.dump(context, output, ensure_ascii=False, indent=2)
     return {item['evidencePath'] for item in context['files']}
 
 
-def verify(root, d, n, k, with_context=False):
-    package, receipt = paths(d, n, k)
+def verify(root, d, n, k, with_context=False, storage=None):
+    package, receipt = paths(d, n, k, storage)
     if not package.exists() and not receipt.exists():
         return set()
     rec = json.loads(receipt.read_bytes())
@@ -143,6 +189,9 @@ if __name__ == '__main__':
     try:
         argv = sys.argv[1:]
         context_only = bool(argv and argv[0] == '--context')
+        extend_only = bool(argv and argv[0] == '--extend')
+        if extend_only:
+            argv = argv[1:]
         if context_only:
             root, slug, n, k = argv[1:]
         else:
@@ -152,8 +201,9 @@ if __name__ == '__main__':
         if context_only:
             print(json.dumps(reviewer_context(root, d, n, k), ensure_ascii=False))
         else:
-            result = prepare(root, d, n, k, json.loads(Path(source).read_bytes()))
-            print(json.dumps({'files': sorted(result), 'reviewerContext': reviewer_context(root, d, n, k)}, ensure_ascii=False))
+            operation = extend if extend_only else prepare
+            result = operation(root, d, n, k, json.loads(Path(source).read_bytes()))
+            print(json.dumps({'files': sorted(result), 'package': str(paths(d, n, k)[0]), 'reviewerContext': reviewer_context(root, d, n, k)}, ensure_ascii=False))
     except (ValueError, OSError, KeyError, TypeError, zipfile.BadZipFile) as error:
         print(json.dumps({'error': str(error)}, ensure_ascii=False))
         sys.exit(1)

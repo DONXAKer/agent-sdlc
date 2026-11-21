@@ -12,7 +12,7 @@
       "properties": {
         "path": {"type": "string", "minLength": 1},
         "claims": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^claim-[1-9][0-9]*$"}},
-        "kind": {"enum": ["observation", "stdout", "screenshot", "sql_trace", "fixture"]},
+        "kind": {"enum": ["observation", "stdout", "screenshot", "video", "sql_trace", "fixture"]},
         "source": {"type": "string", "minLength": 1},
         "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "revision": {"type": "object", "additionalProperties": false, "required": ["head_sha", "diff_sha256"],

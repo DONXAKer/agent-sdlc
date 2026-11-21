@@ -28,6 +28,19 @@ class ContextEvidenceTests(unittest.TestCase):
         locator.write_text('Точка правки: app.py, answer.\n', encoding='utf-8')
         return self.tool('attempt-evidence.py', 'prepare', self.root, 'T-1', n, '--locator', locator.name, env=env)
 
+    def test_prepare_checks_approval_and_planned_size_before_receipt(self):
+        self.snapshot()
+        plan = self.plan.read_text(encoding='utf-8')
+        expanded = plan + ''.join(f'| file-{i}.py | правка |\n' for i in range(8))
+        for invalid in (plan.replace('Оператор · 2026-11-09', 'ожидается решение'), expanded,
+                        expanded + '\nПочему этот chunk больше ориентира: нет\n'):
+            self.plan.write_text(invalid, encoding='utf-8')
+            self.assertEqual(self.prepare().returncode, 1)
+            self.assertFalse(chunk_preconditions.receipt_path(self.d, 1).exists())
+        self.plan.write_text(expanded + '\nПочему этот chunk больше ориентира: общий контракт.\n', encoding='utf-8')
+        result = self.prepare()
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_early_receipt_accepts_git_and_dirty_snapshot(self):
         for kind in ('git', 'snapshot'):
             with self.subTest(kind=kind):

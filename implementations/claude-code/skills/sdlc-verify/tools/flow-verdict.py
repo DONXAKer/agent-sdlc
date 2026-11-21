@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sdlc_common import (  # noqa: E402  — константы и разбор: один источник на все инструменты
     ACTIONS, AXES, CHUNK_FILES, CHUNK_LINES, CONSTANTS, DEFAULT_BUDGET as _DEFAULT_BUDGET,
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
-    gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path, preparation_checks,
+    plan_approved, approval_line, size_explained, gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path, preparation_checks,
     readiness_verdict, readiness_ok, diffstat, defect_class_catalog, defect_class_name, axis_outcome_kind,
     enabled as switch_enabled, gate_rows, dictionary_value,
 )
@@ -100,39 +100,6 @@ def holes_in(text: str):
         if HOLE_RE.search(strip_literal_spans(ln)):
             holes.append(ln)
     return holes
-
-
-def approval_line(plan: str) -> str:
-    return next((ln for ln in (plan or "").splitlines() if "**Одобрение:**" in ln), "")
-
-
-def plan_approved(plan: str) -> bool:
-    """Одобрение — значащая часть строки до « / »-альтернативы шаблона.
-
-    «Иван · 2026-08-15 / **не одобрен — …**» (не вычищенный хвост заготовки) — одобрен;
-    «не одобрен — вернуться после 2026-08-20» — НЕ одобрен, дата в причине не спасает;
-    «ожидается решение к 2026-08-20» — НЕ одобрен: слово ожидания сильнее даты;
-    «Тест-Оператор · 2026-08-15 · источник: файл ответов» — одобрен.
-    """
-    raw = approval_line(plan).split("**Одобрение:**", 1)[-1]
-    # отрезаем только хвост заготовки «/ не одобрен — …» (болд необязателен, пробелы любые);
-    # слэш внутри значения («Иван / Оператор») не трогаем
-    value = re.split(r"\s*/\s*\*{0,2}не одобрен", raw)[0]
-    # Ненужность повторного решения не отменяет ранее выданные полномочия.
-    value = re.sub(r"(?:отдельное\s+)?повторное\s+согласование\s+не\s+требуется", "", value, flags=re.I)
-    # решение ещё не принято: отрицание или слово ожидания в значении — не одобрение,
-    # даже если рядом стоит дата; сомнение трактуется как «не одобрен» (ложный провал громкий,
-    # ложное «одобрен» пропускало бы неодобренный план молча)
-    if re.search(r"(?<!\w)не\s|ожида|отложен|позже|вернуться|tbd|\?", value, re.I):
-        return False
-    authority = re.search(r"пользовател\w*\s+(?:явно\s+)?(?:поручил|разрешил|делегировал)([^;\n]*)", value, re.I)
-    execution = (r"вести\s+(?:цель|задачи)\b|"
-                 r"(?:выполнить|выполнение|выполнять)\s+(?:текущ\w*\s+)?(?:план\w*|реализаци\w*|задач[уи])\b|"
-                 r"реализовать\s+(?:текущ\w*\s+)?(?:план|задачу|изменения)\b")
-    delegated = (bool(authority and re.search(execution, authority.group(1), re.I))
-                 and not re.search(r"только\s+чтени|изучить|прочитать|исследова|\bаудит|\bанализ", authority.group(1), re.I)
-                 and bool(re.search(r"\$sdlc-run|AGENTS\.md|источник:\s*сообщение", value, re.I)))
-    return bool(re.search(r"20\d\d", value)) or "источник: файл ответов" in value or delegated
 
 
 def attempt_nums(journal: str):
@@ -960,7 +927,7 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
                 except (OSError, ValueError, KeyError, TypeError) as error:
                     v.fail(f'размер {ev.name} подтверждён', str(error), 'восстанови свидетельства; не переписывай историю')
             by_chunk.setdefault(int(m.group(1)), {})[int(m.group(2))] = (stat, bool(chunk_diff))
-    explained = bool(re.search(r"почему этот chunk больше ориентира", plan or "", re.I))
+    explained = size_explained(plan)
     prev_lines, prev_files = 0, 0
     for cn in sorted(by_chunk):
         stat, measured = by_chunk[cn][max(by_chunk[cn])]

@@ -240,7 +240,7 @@ CONSUMERS = {
     "gate_statuses": lambda: "/".join(C["gate_statuses"]) in templates_text,
     "claim_statuses": lambda: "/".join(C["claim_statuses"]) in templates_text,
     "actions": lambda: '"actions"' in py_text and " / ".join(C["actions"]) in templates_text,
-    "prediction_outcomes": lambda: all(value in sdlc and value in read('profiles/guided.md')
+    "prediction_outcomes": lambda: all(value in read('process-quality.md') and value in read('profiles/guided.md')
                                        for value in C['prediction_outcomes'].values()),
     "stability_states": lambda: all(f'`{value}`' in sdlc for value in C['stability_states']),
     "p_chart": lambda: str(C['p_chart']['minimum_n']) in sdlc and C['p_chart']['minimum_n'] >= 20,

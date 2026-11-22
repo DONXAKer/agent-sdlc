@@ -20,7 +20,8 @@ for skill in skills:
     text = skill.read_text(encoding='utf-8')
     assert text.startswith('---\n')
     assert 'description:' in text.split('---', 2)[1]
-    assert '${KIMI_SKILL_DIR}/../sdlc-run/references/SDLC.md' in text
+    reference = 'process-quality.md' if skill.parent.name in ('sdlc-seed', 'sdlc-retro') else 'SDLC.md'
+    assert '${KIMI_SKILL_DIR}/../sdlc-run/references/' + reference in text
     assert '${KIMI_SKILL_DIR}/../sdlc-verify/tools' in text
     assert 'Общий контракт Codex' not in text
 

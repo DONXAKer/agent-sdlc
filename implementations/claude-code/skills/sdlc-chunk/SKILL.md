@@ -4,6 +4,8 @@ description: "Этап 5 Agent-SDLC — chunk. Точечная разведка
 allowed-tools: Read, Grep, Glob, Write, Edit, Agent, AskUserQuestion, Bash
 ---
 
+Для пилота используй runner-lite.py prepare перед первой правкой. После реализации выполни check для текущей попытки.
+
 ## Контракт этапа
 
 - **Вход:** `plan.md` с одобрением (и «Контекст-пакетом»), `.sdlc/gates.md`; на retry — `retry_instruction` отчёта

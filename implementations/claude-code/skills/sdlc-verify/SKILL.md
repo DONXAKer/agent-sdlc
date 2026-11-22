@@ -4,6 +4,8 @@ description: "Этап 6 Agent-SDLC — верификация. Перегене
 allowed-tools: Read, Grep, Glob, Write, Edit, Agent, AskUserQuestion, Bash
 ---
 
+Для пилота проверь свидетельства через runner-lite.py check. Получи независимое ревью, выполни review и verdict.
+
 ## Контракт этапа
 
 Для runtime-испытаний и повторной верификации используй `references/runtime-verification.md`.

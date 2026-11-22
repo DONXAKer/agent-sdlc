@@ -4,6 +4,8 @@ description: "Этап 4 Agent-SDLC — план витка. Повторно п
 allowed-tools: Read, Grep, Glob, Write, Edit, AskUserQuestion, Bash(git rev-parse:*), Bash(git grep:*), Bash(python:*)
 ---
 
+Для пилота предложи профиль, границы, бюджет и проверки. Получи одно одобрение текущей редакции требований и плана.
+
 ## Контракт этапа
 
 Свяжи источник из intent, claim, шаг и проверку. Команда в плане ещё не является свидетельством выполнения.

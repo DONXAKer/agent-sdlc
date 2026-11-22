@@ -71,6 +71,8 @@ import json
 import os
 import re
 import sys
+from contextlib import contextmanager
+from tempfile import NamedTemporaryFile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -91,7 +93,32 @@ CAPABILITIES = ("baseline", "compare", "git", "preflight", "prepare", "run-gate"
 
 def write_bytes_text(path: Path, text: str):
     """Записать текст как есть: без перевода \\n → \\r\\n и без потери \\r."""
-    path.write_bytes(text.encode("utf-8", errors="surrogateescape"))
+    with NamedTemporaryFile(dir=path.parent, prefix='.write-', delete=False) as tmp:
+        staging = Path(tmp.name)
+        tmp.write(text.encode("utf-8", errors="surrogateescape"))
+    try:
+        staging.replace(path)
+    finally:
+        staging.unlink(missing_ok=True)
+
+
+@contextmanager
+def attempt_lock(directory, n, k):
+    """Блокировка ядра освобождается также при аварийном завершении процесса."""
+    if not all(re.fullmatch(r'[1-9][0-9]*', str(value)) for value in (n, k)):
+        raise ValueError('Недопустимый номер попытки')
+    with (directory / f'.chunk-{n}-attempt-{k}.lock').open('a+b') as lock:
+        lock.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise ValueError('Запись этой попытки уже выполняется') from error
+        yield
 
 
 def read_bytes_text(path: Path) -> str:
@@ -153,14 +180,14 @@ def current_revision(root, d):
     return base, sha256(current_diff(root, d, base, snapshot))
 
 
-def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model, force: bool, layer=None) -> int:
+def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model, force: bool, layer=None, resume=False) -> int:
     d = root / ARTIFACTS_DIR / slug
     base, snapshot = snapshot_base.load(root, d)
     base_sha = base['id'] if base['kind'] == 'git' else None
     tests_cmd = tests_cmd or require_tests_cmd(read(root / ARTIFACTS_DIR / "gates.md", ""))
     context = gate_context(root, d, tests_cmd, n, k, layer, allow_pending_patch=True)
     patch, tests_out, evidence = paths_for(d, n, k)
-    if not force and any(p.exists() for p in (patch, tests_out, evidence)):
+    if not force and (evidence.exists() or (not resume and any(p.exists() for p in (patch, tests_out)))):
         print(f"попытка {k} chunk'а {n} уже имеет свидетельства — они не перезаписываются "
               f"(следующая попытка = следующий номер; --force только осознанно)")
         return 1
@@ -185,6 +212,12 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         if 'tree' in receipt:
             chunk_diff = snapshot_base.snapshot_diff(root, chunk_preconditions.load_tree(root, d, n),
                                                      git_special=base['kind'] == 'git', d=d)
+    chunk_patch = d / f'chunk-{n}-attempt-{k}-chunk.patch'
+    if resume and any(p.exists() for p in (patch, tests_out, chunk_patch)):
+        if not patch.is_file() or read_bytes_text(patch) != diff:
+            raise ValueError('Незавершённая попытка относится к другой редакции патча')
+        if chunk_patch.exists() and read_bytes_text(chunk_patch) != chunk_diff:
+            raise ValueError('Патч chunk отличается от незавершённой попытки')
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     write_bytes_text(patch, diff)
     rc, output = run_shell(tests_cmd, root, env={**os.environ, **context})
@@ -209,13 +242,12 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
     if tracking is not None:
         record['candidate_tracking'] = tracking
     if chunk_diff is not None:
-        chunk_patch = d / f'chunk-{n}-attempt-{k}-chunk.patch'
-        if chunk_patch.exists() and not force:
+        if chunk_patch.exists() and not (force or resume):
             raise ValueError('Патч chunk уже существует')
         write_bytes_text(chunk_patch, chunk_diff)
         record['chunk_diff'] = {'path': chunk_patch.name, 'sha256': sha256(chunk_diff),
                                 'diffstat': diffstat(chunk_diff)}
-    evidence.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_bytes_text(evidence, json.dumps(record, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({key: record[key] for key in ("diff_empty", "diffstat", "tests_exit", "missing_tool")},
                      ensure_ascii=False))
     print(f"записано: {patch.name}, {tests_out.name}, {evidence.name}")
@@ -308,7 +340,8 @@ def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
         "produced_by": (rec or {}).get("tool", "не программой — файлы написал агент, свидетельством не считаются"),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["diff_matches_tree"] and result['base_matches_evidence'] else 1
+    intact = ('diff_matches_tree', 'base_matches_evidence', 'patch_matches_evidence', 'tests_matches_evidence')
+    return 0 if all(result[key] for key in intact) else 1
 
 
 def main() -> int:
@@ -329,6 +362,7 @@ def main() -> int:
     w.add_argument("root"); w.add_argument("slug"); w.add_argument("n"); w.add_argument("k")
     w.add_argument("--tests-cmd"); w.add_argument("--executor-model"); w.add_argument("--force", action="store_true")
     w.add_argument('--layer')
+    w.add_argument('--resume', action='store_true', help='Продолжить прерванную запись для того же патча')
     for mode in ('preflight', 'run-gate'):
         runner = sub.add_parser(mode)
         runner.add_argument('root'); runner.add_argument('slug'); runner.add_argument('n'); runner.add_argument('k')
@@ -395,7 +429,10 @@ def main() -> int:
         print(json.dumps({'kind': 'snapshot', 'id': snapshot_base.create(root, root / ARTIFACTS_DIR / a.slug)}))
         return 0
     if a.mode == "write":
-        return write_mode(root, a.slug, a.n, a.k, a.tests_cmd, a.executor_model, a.force, a.layer)
+        if a.force and a.resume:
+            raise ValueError('Выбери один режим записи')
+        with attempt_lock(root / ARTIFACTS_DIR / a.slug, a.n, a.k):
+            return write_mode(root, a.slug, a.n, a.k, a.tests_cmd, a.executor_model, a.force, a.layer, a.resume)
     if a.mode == "baseline":
         return baseline_mode(root, a.slug, a.n)
     if a.mode == "compare":

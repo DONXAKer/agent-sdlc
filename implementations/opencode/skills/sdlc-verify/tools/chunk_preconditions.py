@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import snapshot_base
+from sdlc_common import profile_gate_errors, task_profile
 from sdlc_common import ARTIFACTS_DIR, CHUNK_FILES, artifact_targets, defect_class_catalog, files_to_touch, patch_files, plan_approved, preparation_checks, read, size_explained
 
 PREPARE_VERSION = 2
@@ -44,6 +45,7 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
     problems = [f'{name}: {detail}' for ok, name, detail in
                 preparation_checks(intent, plan, readiness, contour(intent) == 'мелкий') if not ok]
     catalog = defect_class_catalog(read(root / ARTIFACTS_DIR / 'gates.md', ''))
+    problems.extend(profile_gate_errors(intent, read(root / ARTIFACTS_DIR / 'gates.md', '')))
     problems.extend(f'Классы дефектов проекта: {error}' for error in catalog['errors'])
     if problems:
         raise ValueError('; '.join(problems))
@@ -89,6 +91,7 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
             raise ValueError('Dirty-база изменилась после baseline; предусловия не доказаны')
     record = {'version': PREPARE_VERSION, 'tool': 'attempt-evidence.py prepare', 'status': 'ready', 'artifact_targets': targets,
               'profile': profile,
+              'task_profile': task_profile(intent),
               'slug': d.name, 'chunk': int(n), 'base': base,
               'plan_sha256': text_digest(d / 'plan.md'),
               'locator': {'path': locator, 'sha256': text_digest(locator_path)},
@@ -178,6 +181,8 @@ def errors(root, d, n, expected_hash=None, historical=False):
                 raw = artifact(d, saved['path']).read_bytes()
                 if snapshot_base.digest(raw) != saved['sha256']:
                     return ['Историческая редакция документа изменена']
+                if name == 'intent.md' and rec.get('task_profile') != task_profile(raw.decode('utf-8')):
+                    return ['Профиль квитанции отличается от закреплённого intent']
                 if not historical and (d / name).read_bytes() != raw:
                     return ['Intent или readiness изменились после квитанции; требуется новая подготовка']
         if 'tree' in rec:

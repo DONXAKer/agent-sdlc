@@ -20,7 +20,8 @@ for skill in skills:
     text = skill.read_text(encoding='utf-8')
     assert text.startswith('---\n')
     assert 'description:' in text.split('---', 2)[1]
-    assert '../sdlc-run/references/SDLC.md' in text
+    reference = 'process-quality.md' if skill.parent.name in ('sdlc-seed', 'sdlc-retro') else 'SDLC.md'
+    assert '../sdlc-run/references/' + reference in text
     assert 'Общий контракт Qwen Code' in text
     assert '/sdlc-' in text
     assert '../sdlc-verify/tools' in text

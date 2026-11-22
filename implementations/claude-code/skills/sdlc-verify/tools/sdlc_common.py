@@ -147,6 +147,27 @@ def size_explained(plan):
     return False
 
 
+def task_profile(intent):
+    values = re.findall(r'^\*\*Профиль задачи:\*\*[ \t]*(\S+)[ \t]*\r?$', intent or '', re.M)
+    if len(values) == 1 and values[0] in ('bugfix', 'feature', 'service-from-scratch', 'docs-config'):
+        return values[0]
+    return None
+
+
+def profile_gate_errors(intent, gates):
+    profile = task_profile(intent)
+    if not profile:
+        return []
+    enabled = {name for name, _, _ in enabled_gates(gates or '', 'этап 6')}
+    required = set()
+    runtime = '**Воспроизведение:** runtime' in (intent or '').splitlines()
+    if profile in ('feature', 'service-from-scratch') or (profile == 'bugfix' and not runtime):
+        required.add('Сверка тестов с claims')
+    if profile == 'bugfix' and not runtime:
+        required.add('Тесты красные на базе')
+    return [f'Профиль {profile} требует гейт «{name}»' for name in sorted(required - enabled)]
+
+
 def preparation_checks(intent, plan, readiness, small=False):
     """Один контракт формы и mapping для раннего и итогового этапов."""
     rows = [line for line in (intent or '').splitlines() if re.match(r'^\|\s*claim-\d+\b[^|]*\|', line)]
@@ -161,6 +182,9 @@ def preparation_checks(intent, plan, readiness, small=False):
         (set().union(*(claims_in(row.split("|")[1]) for row in rows)) == ci if rows else False,
          'все claim-ID заданы строками таблицы', 'claim-ID вне канонической таблицы'),
     ]
+    if '**Профиль задачи:**' in (intent or '') or '**Маршрут:** пилотный' in (intent or '').splitlines():
+        checks.append((bool(task_profile(intent)), 'профиль задачи распознан',
+                       'укажи один профиль задачи на отдельной строке'))
     cards = re.split(r'^### Шаг [1-9]\d*\s+[^\n]+\n', plan or '', flags=re.M)[1:]
     supports, closes, malformed = set(), set(), False
     for card in cards:
@@ -179,7 +203,7 @@ def preparation_checks(intent, plan, readiness, small=False):
         checks.append((not malformed and not uncovered, 'вспомогательные шаги обеспечивают проверку',
                        'укажи «закрывает: нет» и известные claim-ID; '
                        f'без закрывающего шага или явного переноса: {sorted(uncovered)}'))
-    if not small:
+    if not small and not task_profile(intent):
         checks.append((len(rows) >= 3 and sum('[edge]' in row for row in rows) >= 2,
                        'полный контур: ≥3 пунктов, ≥2 [edge]', 'недостаточно строк или граничных случаев'))
     for n in (1, 2):

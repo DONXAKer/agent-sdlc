@@ -14,7 +14,7 @@ description: Уточни развилки. Применяй для соотве
 
 ## Общий контракт Kimi Code
 
-Прочитай ${KIMI_SKILL_DIR}/../sdlc-run/references/SDLC.md и нужные формы из ${KIMI_SKILL_DIR}/../sdlc-verify/templates.
+Открой раздел «3. ВОПРОСЫ» в ${KIMI_SKILL_DIR}/../sdlc-run/references/SDLC.md. Загрузи форму текущего этапа из ${KIMI_SKILL_DIR}/../sdlc-verify/templates.
 Пути ресурсов разрешай относительно файла навыка, а пути проекта передавай явно и заключай в кавычки.
 Служебные Python-инструменты находятся в ${KIMI_SKILL_DIR}/../sdlc-verify/tools. Сначала прочитай их справку и контракт аргументов.
 Источник состояния — .sdlc/<slug> целевого проекта. Не восстанавливай решения из памяти диалога.

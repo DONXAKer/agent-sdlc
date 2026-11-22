@@ -153,9 +153,11 @@ def small_scope_errors(d, intent):
     for patch in natsorted(d.glob('chunk-*-attempt-*-diff.patch')):
         match = re.fullmatch(r'chunk-(\d+)-attempt-\d+-diff.patch', patch.name)
         selected = chunk_preconditions.contour(intent)
+        profile = None
         try:
             rec = json.loads(chunk_preconditions.receipt_path(d, match.group(1)).read_text(encoding='utf-8'))
             selected = rec.get('contour', selected)
+            profile = rec.get('task_profile')
         except (OSError, ValueError, AttributeError):
             pass  # Повреждение квитанции проверяет отдельный гейт.
         raw = patch.read_bytes()
@@ -165,7 +167,7 @@ def small_scope_errors(d, intent):
             header = DIFF_GIT.match(line)
             if header:
                 paths.add(unquote_git_path(header.group(1) if header.group(1) is not None else header.group(2)))
-        if selected != 'мелкий' or len(paths) <= 1:
+        if profile in ('bugfix', 'feature', 'docs-config') or selected != 'мелкий' or len(paths) <= 1:
             continue
         code = sorted(name for name in paths if Path(name).suffix.casefold() in code_types)
         unknown = {name for name in paths if Path(name).suffix.casefold() not in documentation_config
@@ -702,6 +704,8 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     for name, detail in gate_configuration_errors(gates, root=root, slug=slug):
         v.check(False, f"конфигурация гейта {name}", detail, "заполни состояние переключателя явно")
     intent = texts.get("intent.md")
+    for error in chunk_preconditions.profile_gate_errors(intent, gates):
+        v.check(False, 'гейты профиля задачи', error, 'восстанови согласованный набор гейтов')
     readiness = texts.get("readiness.md")
     plan = texts.get("plan.md")
     handoff = texts.get("handoff.md")

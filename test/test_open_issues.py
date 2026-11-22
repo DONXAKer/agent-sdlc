@@ -707,6 +707,7 @@ class MethodologyPracticeTests(unittest.TestCase):
     def setUp(self):
         self.constants = json.loads((ROOT / 'sdlc-constants.json').read_text(encoding='utf-8'))
         self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+        self.sdlc += '\n' + (ROOT / 'process-quality.md').read_text(encoding='utf-8')
         self.guided = (ROOT / 'profiles/guided.md').read_text(encoding='utf-8')
 
     def test_prediction_calibration_has_three_outcomes_and_does_not_change_verdict(self):
@@ -786,7 +787,7 @@ class MethodologyPracticeTests(unittest.TestCase):
                       'Fagan', 'Синго', 'Теория ограничений', 'ISO/IEC 25010'):
             self.assertIn(label, section)
         self.assertIn('(templates/retro-a3.template.md)', section)
-        self.assertIn('(SDLC.md#стабильность-вердиктов-по-сериям)', section)
+        self.assertIn('(process-quality.md#стабильность-вердиктов-по-сериям)', section)
         self.assertIn('Six Sigma и формальное соответствие ISO 9001/CMMI проект не заявляет', section)
 
 

@@ -90,6 +90,7 @@ def generated(root):
     for name in TEMPLATES:
         path = Path('templates') / (name + '.template.md')
         desired[CODEX / 'skills/sdlc-verify/templates' / path.name] = canonical_bytes(root / path)
+    desired[CODEX / 'skills/sdlc-run/references/process-quality.md'] = canonical_bytes(root / 'process-quality.md')
     desired[CODEX / 'skills/sdlc-run/references/SDLC.md'] = canonical_bytes(root / 'SDLC.md')
     desired[CODEX / 'skills/sdlc-run/references/runtime-verification.md'] = canonical_bytes(root / 'runtime-verification.md')
     codex_skills = selected_files(root, [name for name in inventory(root)['codex'] if Path(name).is_relative_to(CODEX / 'skills')], desired)
@@ -213,7 +214,7 @@ def package(root=ROOT, revision=None):
             entries = {p.relative_to(base).as_posix(): data for p, data in payload.items()}
         else:
             entries = {p.as_posix(): data for p, data in payload.items()}
-            for name in ('install.sh', 'junk-names.sh', 'SDLC.md'):
+            for name in ('install.sh', 'junk-names.sh', 'SDLC.md', 'process-quality.md'):
                 entries[name] = canonical_bytes(root / name)
         entries['build.json'] = encoded({'revision': revision, 'version': version,
                                         'sha256': {n: hashlib.sha256(b).hexdigest() for n, b in sorted(entries.items())}})

@@ -59,7 +59,7 @@ jobs:
             implementations/claude-code/skills/sdlc-verify/tools/**
             implementations/codex/skills/**/templates/**
             implementations/codex/skills/sdlc-verify/tools/**
-            implementations/codex/skills/sdlc-run/references/SDLC.md
+            implementations/codex/skills/sdlc-run/references/**
             implementations/codex/manifest.json
             implementations/codex/generated-resources.json
             implementations/cursor/skills/**

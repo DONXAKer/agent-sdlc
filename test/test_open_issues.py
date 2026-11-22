@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from test import test_context_evidence as fixtures
 from test.test_issue_regressions import flow
 import chunk_preconditions
+import gate_evidence
 import snapshot_base
 import review_evidence
 import git_operation
@@ -26,6 +27,260 @@ spec.loader.exec_module(review_validator)
 
 
 class OpenIssueTests(fixtures.ContextEvidenceTests):
+    def test_auxiliary_step_connects_existing_claim_without_closing_it(self):
+        intent = (self.d / 'intent.md').read_text(encoding='utf-8')
+        readiness = (self.d / 'readiness.md').read_text(encoding='utf-8')
+        plan = ('### Шаг 1 — восстановить сборку\n- файл: build.toml\n- закрывает: нет\n'
+                '- обеспечивает проверку: claim-1\n- проверка: компиляция тестов\n'
+                '### Шаг 2 — проверить экспорт\n- файл: tests/test_export.py\n'
+                '- закрывает: claim-1\n- зависит от: 1\n')
+        verdict = lambda text: {name: ok for ok, name, _ in preparation_checks(intent, text, readiness, True)}
+        self.assertTrue(all(verdict(plan).values()))
+        self.assertTrue(all(verdict(plan.replace('закрывает: нет', 'закрывает: нет  ')).values()))
+        self.assertFalse(verdict(plan.replace('проверку: claim-1', 'проверку: claim-99'))['claims intent == plan'])
+        step = 'вспомогательные шаги обеспечивают проверку'
+        self.assertFalse(verdict(plan.split('### Шаг 2')[0])[step])
+        self.assertFalse(verdict(plan.replace('закрывает: нет', 'закрывает: claim-1'))[step])
+        deferred = plan.split('### Шаг 2')[0] + '- **Уходит следующим chunk\'ам:** claim-1, chunk 2\n'
+        self.assertTrue(verdict(deferred)[step])
+
+    def test_prepare_receipt_versions_preserve_historical_files(self):
+        self.snapshot()
+        result = self.prepare()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        path = chunk_preconditions.receipt_path(self.d, 1)
+        record = json.loads(path.read_bytes())
+        self.assertEqual(record['version'], 2)
+        self.assertEqual(record['contour'], 'мелкий')
+        self.assertEqual(chunk_preconditions.errors(self.root, self.d, 1), [])
+        record['version'] = 1
+        path.write_text(json.dumps(record), encoding='utf-8')
+        self.assertEqual(chunk_preconditions.errors(self.root, self.d, 1), [])
+        del record['contour']
+        old = json.dumps(record).encode('utf-8')
+        path.write_bytes(old)
+        self.assertIn('v1 без contour несовместима', chunk_preconditions.errors(self.root, self.d, 1)[0])
+        self.assertEqual(path.read_bytes(), old)
+
+    def test_snapshot_prepare_reports_two_comparisons(self):
+        (self.root / 'app.py').write_bytes(b'answer = 7\r\n')
+        self.snapshot()
+        late = self.root / 'new.py'
+        late.write_text('value = 1\n', encoding='utf-8')
+        result = self.prepare()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('от Git HEAD: 2', result.stdout)
+        self.assertIn('относительно снимка: 1 путей: new.py', result.stdout)
+        self.assertNotIn('чужих', result.stdout)
+        record = json.loads(chunk_preconditions.receipt_path(self.d, 1).read_bytes())
+        self.assertEqual(record['base']['kind'], 'snapshot')
+        self.assertEqual(chunk_preconditions.errors(self.root, self.d, 1), [])
+
+    def test_prepare_refuses_invalid_defect_class_before_recording_receipt(self):
+        self.snapshot()
+        gates = self.d.parent / 'gates.md'
+        with gates.open('a', encoding='utf-8') as output:
+            output.write('\n## Классы дефектов проекта\n\n- класс без даты\n')
+        result = self.prepare()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Классы дефектов проекта', result.stdout)
+        self.assertIn('- класс без даты', result.stdout)
+        self.assertFalse(chunk_preconditions.receipt_path(self.d, 1).exists())
+
+    def test_retry_blocks_verify_route_until_same_report_is_corrected(self):
+        source = ROOT / 'test/flow-verdict-corpus/green/.sdlc'
+        archive = self.root / '.sdlc/green'
+        shutil.copytree(source / 'green', archive)
+        shutil.copyfile(source / 'gates.md', archive.parent / 'gates.md')
+        report = archive / 'verification-report-1-attempt-1.md'
+        text = report.read_text(encoding='utf-8').replace('**passed:** true', '**passed:** false').replace('**action:** continue', '**action:** retry')
+        for value in ('', 'н/п / н/п', 'н/п/н/п', 'TODO', '‹что делать›'):
+            report.write_text(text + f'\n- **retry_instruction:** {value}\n', encoding='utf-8')
+            result = self.tool('flow-verdict.py', '--at', 'verify', self.root, 'green')
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn('Заполни retry_instruction', result.stdout)
+            result = self.tool('flow-verdict.py', '--print', 'action', self.root, 'green')
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(report.name, result.stderr)
+        report.write_text(text + '\n- **retry_instruction:** Сохрани сортировку экспортированных строк.\n', encoding='utf-8')
+        result = self.tool('flow-verdict.py', '--at', 'verify', self.root, 'green')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.tool('flow-verdict.py', '--print', 'action', self.root, 'green')
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, 'retry'))
+        self.assertEqual(list(archive.glob('verification-report-*.md')), [report])
+
+    def test_metrics_separate_accepted_aborted_and_missing_handoff(self):
+        for slug in ('accepted', 'aborted', 'missing', 'unconfirmed'):
+            d = self.d.parent / slug
+            d.mkdir()
+            (d / 'intent.md').write_text('Задача\n', encoding='utf-8')
+            report = d / 'verification-report-1-attempt-1.md'
+            report.write_text('- **passed:** true\n', encoding='utf-8')
+            if slug != 'unconfirmed':
+                flow.verify_receipt(d, report, 0)
+            if slug != 'missing':
+                verdict = 'aborted' if slug == 'aborted' else 'passed'
+                handoff = ('## Виток 1\n- **Приёмка:** принял Оператор · 2026-08-01\n\n'
+                           '## Состояние (машиночитаемое)\n\n```yaml\n'
+                           f'chunk: 1\nattempts: 1\nverdict: {verdict}\n```\n')
+                (d / 'handoff.md').write_text(handoff, encoding='utf-8')
+        result = self.tool('flow-verdict.py', '--metrics', self.root)
+        # T-1 из общей фикстуры тоже ещё без handoff.
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('успешно завершено: 1 · незавершённых: 4', result.stdout)
+        self.assertIn('Незавершённых с handoff: 2 · без handoff: 2', result.stdout)
+
+    def test_terminal_escalation_transfers_same_slug_before_retro(self):
+        skill = (ROOT / 'implementations/codex/skills/sdlc-run/SKILL.md').read_text(encoding='utf-8')
+        self.assertRegex(skill, r'`passed: false` и `action: escalate`[^\n]*`\$sdlc-handoff` для этого slug')
+        self.assertIn('Ретроспективу запускай после сохранения handoff', skill)
+        self.assertIn('При `action: retry` продолжай текущий chunk', skill)
+
+    def test_handoff_checks_review_pass_for_each_historical_attempt(self):
+        source = ROOT / 'test/flow-verdict-corpus/handoff-green/.sdlc'
+        slug = 'handoff-green'
+        d = self.root / '.sdlc' / slug
+        shutil.copytree(source / slug, d)
+        shutil.copyfile(source / 'gates.md', d.parent / 'gates.md')
+        for name in ('verification-report-1-attempt-1.md', 'chunk-1-attempt-1-diff.patch', 'chunk-1-attempt-1-tests.txt'):
+            shutil.copyfile(d / name, d / name.replace('attempt-1', 'attempt-2'))
+        journal = d / 'chunk-1-journal.md'
+        with journal.open('a', encoding='utf-8') as output:
+            output.write('\n| 2 | 2026-08-01 | Изменена проверка | Свидетельство | passed=true |\n')
+        first = d / 'verification-report-1-attempt-1.md'
+        body = first.read_text(encoding='utf-8').replace('**passed:** true', '**passed:** false').replace(
+            '**action:** continue', '**action:** retry') + '\n- **retry_instruction:** Исправь ошибку в проверке.\n'
+        first.write_text(body + '- **По каким условиям упал:** блокирующее замечание независимого ревью\n', encoding='utf-8')
+        checked = self.tool('flow-verdict.py', '--at', 'handoff', self.root, slug)
+        self.assertEqual(checked.returncode, 1)
+        self.assertIn('Отчёт называет независимое ревью причиной', checked.stdout)
+        first.write_text(body.replace('| Тесты | ✅', '| Тесты | ❌') +
+                         '- **По каким условиям упал:** Тесты вернули отказ, Ревью независимым агентом прошло.\n', encoding='utf-8')
+        checked = self.tool('flow-verdict.py', '--at', 'handoff', self.root, slug)
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        patch = d / 'chunk-1-attempt-1-diff.patch'
+        patch.write_text('diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-before\n+after\n', encoding='utf-8')
+        ref = [{'path': diffstat(patch.read_text(encoding='utf-8'))['paths'][0], 'anchor': 'путь'}]
+        answer = d / 'review-raw.json'
+        answer.write_text(json.dumps({'claims': [{'id': f'claim-{n}', 'status': 'passed', 'evidence': ref} for n in (1, 2, 3)],
+                                     'scope': [{'kind': 'scope', 'summary': 'Нарушение области правок', 'evidence': ref}]}), encoding='utf-8')
+        result = self.tool('review-validate.py', self.root, slug, 1, 1, answer)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        checked = self.tool('flow-verdict.py', '--at', 'handoff', self.root, slug)
+        self.assertEqual(checked.returncode, 1)
+        self.assertIn(f'статус независимого ревью ({first.name})', checked.stdout)
+        self.assertIn('Квитанция этой попытки подтверждает ответ с блокирующей находкой', checked.stdout)
+        first.write_text(first.read_text(encoding='utf-8').replace('| Ревью независимым агентом | ✅', '| Ревью независимым агентом | ❌'), encoding='utf-8')
+        checked = self.tool('flow-verdict.py', '--at', 'handoff', self.root, slug)
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+    def test_verify_requires_current_patch_and_project_gate_receipts(self):
+        source = ROOT / 'test/flow-verdict-corpus/green/.sdlc'
+        for path in (source / 'green').glob('*.md'):
+            if not path.name.startswith('.'):
+                shutil.copyfile(path, self.d / path.name)
+        self.plan.write_text(self.plan.read_text(encoding='utf-8').replace('1234567', self.base).replace('example.txt', 'app.py'), encoding='utf-8')
+        path = self.root / 'gate_fixture.py'
+        path.write_text('import os\nimport sys\nfrom pathlib import Path\n'
+                        'kind = sys.argv[1]\n'
+                        'if kind in ("scope", "anti"):\n'
+                        '    print(Path(os.environ["FIXTURE_PATCH"]).read_bytes().decode())\n'
+                        'if kind == "rewrite":\n'
+                        '    Path("app.py").write_bytes(b"answer = 999\\r\\n")\n'
+                        'if kind == "fail":\n'
+                        '    raise SystemExit(3)\n'
+                        'print(kind)\n', encoding='utf-8')
+        scope, anti = 'Scope: файлы вне плана', 'Анти-обход тест-гейта'
+        project = 'Проектные инварианты как ассерты'
+        commands = {name: f'"{sys.executable}" gate_fixture.py {mode}'
+                    for name, mode in ((scope, 'scope'), (anti, 'anti'), (project, 'project'))}
+        contract = {'version': 1, 'commands': [{'command': commands[name], 'inputs': {'FIXTURE_PATCH': 'patch'}}
+                                                for name in (scope, anti)]}
+        (self.d.parent / 'gate-context.json').write_text(json.dumps(contract), encoding='utf-8')
+        gates = (source / 'gates.md').read_text(encoding='utf-8')
+        gates = gates.replace('встроенная реализация', f'`{commands[scope]}`', 1).replace('встроенная реализация', f'`{commands[anti]}`', 1)
+        gates = gates.replace('\n## Долг', f'| {project} | да | этап 6 | `{commands[project]}` |\n\n## Долг')
+        (self.d.parent / 'gates.md').write_text(gates, encoding='utf-8')
+        report = self.d / 'verification-report-1-attempt-1.md'
+        body = report.read_text(encoding='utf-8').replace('\nстрок неприменимости нет', f'| {project} | ✅ | Отметка |\n\nстрок неприменимости нет')
+        report.unlink()
+        ready = self.prepare()
+        self.assertEqual(ready.returncode, 0, ready.stdout + ready.stderr)
+        (self.root / 'app.py').write_bytes(b'answer = 2\r\n')
+        self.write()
+        report.write_text(body, encoding='utf-8')
+
+        def verify():
+            return self.tool('flow-verdict.py', '--at', 'verify', self.root, 'T-1')
+
+        def run_gate(name, attempt):
+            result = self.tool('attempt-evidence.py', 'run-gate', self.root, 'T-1', 1, attempt, '--gate', name)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result
+
+        missing = verify()
+        self.assertEqual(missing.returncode, 1)
+        for name in commands:
+            self.assertIn(f'Гейт «{name}», chunk 1, попытка 1: нет квитанции', missing.stdout)
+        for name in commands:
+            run_gate(name, 1)
+        result = verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        with (self.d / 'chunk-1-journal.md').open('a', encoding='utf-8') as journal:
+            journal.write('\n| 2 | 2026-08-01 | Правка | Исправлено | passed=true |\n')
+        (self.root / 'app.py').write_bytes(b'answer = 3\r\n')
+        self.write(2)
+        (self.d / 'verification-report-1-attempt-2.md').write_text(body.replace('attempt-1', 'attempt-2'), encoding='utf-8')
+        for name in (scope, anti):
+            shutil.copytree(gate_evidence.directory(self.d, 1, 1, name), gate_evidence.directory(self.d, 1, 2, name))
+        stale = verify()
+        self.assertEqual(stale.returncode, 1)
+        for name in (scope, anti):
+            self.assertIn(f'Гейт «{name}», chunk 1, попытка 2: квитанция относится', stale.stdout)
+            self.assertIn('+answer = 3', run_gate(name, 2).stdout)
+        project_runs = gate_evidence.directory(self.d, 1, 2, project)
+        app = self.root / 'app.py'
+        app.write_bytes(b'answer = 999\r\n')
+        result = self.tool('attempt-evidence.py', 'run-gate', self.root, 'T-1', 1, 2, '--gate', project)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('рабочее дерево отличается', result.stdout)
+        self.assertEqual(list(project_runs.glob('run-*')), [])
+        app.write_bytes(b'answer = 3\r\n')
+
+        gates_path = self.d.parent / 'gates.md'
+        command = commands[project]
+        gates_path.write_text(gates.replace(command, command.removesuffix('project') + 'rewrite'), encoding='utf-8')
+        result = self.tool('attempt-evidence.py', 'run-gate', self.root, 'T-1', 1, 2, '--gate', project)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('изменил рабочее дерево', result.stdout)
+        self.assertEqual(list(project_runs.glob('run-*')), [])
+        app.write_bytes(b'answer = 3\r\n')
+
+        gates_path.write_text(gates.replace(command, command.removesuffix('project') + 'fail'), encoding='utf-8')
+        result = self.tool('attempt-evidence.py', 'run-gate', self.root, 'T-1', 1, 2, '--gate', project)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('код выхода команды: 3', verify().stdout)
+
+        gates_path.write_text(gates, encoding='utf-8')
+        run_gate(project, 2)
+        result = verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        output = sorted(project_runs.glob('run-*/output.txt'))[-1]
+        output.write_bytes(output.read_bytes() + b'changed')
+        tampered = verify()
+        self.assertEqual(tampered.returncode, 1)
+        self.assertIn('SHA-256 вывода команды не совпадает', tampered.stdout)
+
+        command = commands[scope] + ' .sdlc/T-1/chunk-1-attempt-1-diff.patch'
+        contract['commands'][0]['command'] = command
+        (self.d.parent / 'gate-context.json').write_text(json.dumps(contract), encoding='utf-8')
+        (self.d.parent / 'gates.md').write_text(gates.replace(commands[scope], command), encoding='utf-8')
+        result = self.tool('attempt-evidence.py', 'run-gate', self.root, 'T-1', 1, 2, '--gate', scope)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('убери фиксированный путь', result.stdout)
+
     def test_chunk_commands_reuse_verified_evidence_tool(self):
         skill = (ROOT / 'implementations/claude-code/skills/sdlc-chunk/SKILL.md').read_text(encoding='utf-8')
         body = skill.split('Зафиксируй путь совместимой копии как `<attempt-evidence>`', 1)[1]
@@ -299,7 +554,15 @@ class OpenIssueTests(fixtures.ContextEvidenceTests):
         for path in (source / 'green').glob('*.md'):
             if not path.name.startswith('.'):
                 shutil.copy(path, self.d / path.name)
-        shutil.copy(source / 'gates.md', self.d.parent / 'gates.md')
+        gate_commands = {'Scope: файлы вне плана': 'git apply --stat "$FIXTURE_PATCH"',
+                         'Анти-обход тест-гейта': 'git apply --numstat "$FIXTURE_PATCH"'}
+        gates = (source / 'gates.md').read_text(encoding='utf-8')
+        for command in gate_commands.values():
+            gates = gates.replace('встроенная реализация', f'`{command}`', 1)
+        (self.d.parent / 'gates.md').write_text(gates, encoding='utf-8')
+        (self.d.parent / 'gate-context.json').write_text(json.dumps({'version': 1, 'commands': [
+            {'command': command, 'inputs': {'FIXTURE_PATCH': 'patch'}} for command in gate_commands.values()
+        ]}), encoding='utf-8')
         report = self.d / 'verification-report-1-attempt-1.md'
         body = report.read_text(encoding='utf-8').replace('**passed:** true', '**passed:** false')
         report.unlink()
@@ -310,6 +573,9 @@ class OpenIssueTests(fixtures.ContextEvidenceTests):
         self.assertEqual(self.prepare().returncode, 0)
         (self.root / 'app.py').write_bytes(b'answer = 2\r\n')
         self.write()
+        for name in gate_commands:
+            result = self.tool('attempt-evidence.py', 'run-gate', self.root, self.d.name, 1, 1, '--gate', name)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         report.write_text(body, encoding='utf-8')
         reference = {'path': 'app.py', 'anchor': 'answer'}
         review = {'claims': [{'id': f'claim-{n}', 'status': 'uncertain' if n == 3 else 'passed',

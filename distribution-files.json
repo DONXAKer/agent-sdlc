@@ -25,6 +25,7 @@
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
     "implementations/claude-code/skills/sdlc-verify/tools/profile_guard.py",
     "implementations/claude-code/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/gate_evidence.py",
     "implementations/claude-code/skills/sdlc-verify/tools/runtime_session.py",
     "implementations/claude-code/skills/sdlc-verify/tools/runtime_protocol.py"
   ],
@@ -86,6 +87,7 @@
     "implementations/codex/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
     "implementations/codex/skills/sdlc-verify/tools/profile_guard.py",
     "implementations/codex/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/codex/skills/sdlc-verify/tools/gate_evidence.py",
     "implementations/codex/skills/sdlc-verify/tools/runtime_session.py",
     "implementations/codex/skills/sdlc-verify/tools/runtime_protocol.py",
     "implementations/codex/skills/sdlc-run/references/runtime-verification.md"
@@ -147,6 +149,7 @@
     "implementations/kimi-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
     "implementations/kimi-code/skills/sdlc-verify/tools/profile_guard.py",
     "implementations/kimi-code/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/kimi-code/skills/sdlc-verify/tools/gate_evidence.py",
     "implementations/kimi-code/skills/sdlc-verify/tools/runtime_session.py",
     "implementations/kimi-code/skills/sdlc-verify/tools/runtime_protocol.py",
     "implementations/kimi-code/skills/sdlc-run/references/runtime-verification.md"
@@ -205,6 +208,7 @@
     "implementations/claude-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
     "implementations/claude-code/skills/sdlc-verify/tools/profile_guard.py",
     "implementations/claude-code/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/claude-code/skills/sdlc-verify/tools/gate_evidence.py",
     "implementations/claude-code/skills/sdlc-verify/tools/runtime_session.py",
     "implementations/claude-code/skills/sdlc-verify/tools/runtime_protocol.py",
     "implementations/claude-code/skills/sdlc-verify/references/runtime-verification.md"
@@ -274,6 +278,7 @@
     "implementations/opencode/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
     "implementations/opencode/skills/sdlc-verify/tools/profile_guard.py",
     "implementations/opencode/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/opencode/skills/sdlc-verify/tools/gate_evidence.py",
     "implementations/opencode/skills/sdlc-verify/tools/runtime_session.py",
     "implementations/opencode/skills/sdlc-verify/tools/runtime_protocol.py",
     "implementations/opencode/skills/sdlc-run/references/runtime-verification.md"
@@ -335,6 +340,7 @@
     "implementations/qwen-code/skills/sdlc-verify/tools/state_contract/schemas/review-evidence-v1.schema.json",
     "implementations/qwen-code/skills/sdlc-verify/tools/profile_guard.py",
     "implementations/qwen-code/skills/sdlc-verify/tools/verification_runs.py",
+    "implementations/qwen-code/skills/sdlc-verify/tools/gate_evidence.py",
     "implementations/qwen-code/skills/sdlc-verify/tools/runtime_session.py",
     "implementations/qwen-code/skills/sdlc-verify/tools/runtime_protocol.py",
     "implementations/qwen-code/skills/sdlc-run/references/runtime-verification.md"

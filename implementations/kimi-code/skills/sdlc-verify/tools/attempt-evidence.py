@@ -32,6 +32,11 @@ SDLC.md → «Свидетельства производит программа
     write сохраняет также отсутствие квитанции, чтобы честное отклонение не потерялось.
     flow-verdict требует квитанцию и её закреплённый хэш; текстовая подпись не доказывает порядок.
 
+Режим именованного гейта (Verify):
+  python attempt-evidence.py run-gate <корень> <slug> <n> <k> --gate <имя из набора> [--layer <слой>]
+    Запускает указанную команду этапа 6, сохраняет вывод и квитанцию, связанную с патчем и evidence попытки.
+    `preflight ... --gate <имя>` проверяет конфигурацию без запуска и записи квитанции.
+
 Режим базы (этап 5, Phase 2 /sdlc-chunk — перед первой правкой):
   python attempt-evidence.py baseline <корень> <slug> <n>
     Пишет `.chunk-<n>-baseline.json`: {путь → sha256 байтов} для всех изменённых и нетракованных
@@ -76,6 +81,7 @@ from sdlc_common import (  # noqa: E402
 )
 import snapshot_base
 import chunk_preconditions
+import gate_evidence
 import profile_guard
 
 TOOL = "attempt-evidence.py"
@@ -136,6 +142,17 @@ def paths_for(d: Path, n: str, k: str):
             d / f"chunk-{n}-attempt-{k}-evidence.json")
 
 
+def current_diff(root, d, base, snapshot):
+    if snapshot is None:
+        return regenerate_diff(root, base['id'], d=d)
+    return snapshot_base.snapshot_diff(root, snapshot, d=d)
+
+
+def current_revision(root, d):
+    base, snapshot = snapshot_base.load(root, d)
+    return base, sha256(current_diff(root, d, base, snapshot))
+
+
 def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model, force: bool, layer=None) -> int:
     d = root / ARTIFACTS_DIR / slug
     base, snapshot = snapshot_base.load(root, d)
@@ -161,7 +178,7 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
         previous_base = record.get('base', {'kind': 'git', 'id': record.get('base_sha')})
         if previous_base != base:
             raise ValueError('База отличается от истории попыток; создай новый виток')
-    diff = regenerate_diff(root, base_sha, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
+    diff = current_diff(root, d, base, snapshot)
     chunk_diff = None
     if chunk_preconditions.receipt_path(d, n).is_file():
         receipt = json.loads(chunk_preconditions.receipt_path(d, n).read_bytes())
@@ -209,7 +226,14 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
     return 0
 
 
-def baseline_mode(root: Path, slug: str, n: str) -> int:
+def workspace_status(root):
+    status = git_out(["status", "--porcelain", "--untracked-files=all", "--", ".", f":(exclude){ARTIFACTS_DIR}"], root)
+    if status is None:
+        raise SystemExit("git status не выполнился — база chunk'а не снята")
+    return status
+
+
+def baseline_mode(root: Path, slug: str, n: str, snapshot_status=None) -> int:
     import hashlib
     d = root / ARTIFACTS_DIR / slug
     # После prepare квитанция пинит sha256 baseline. Повторная съёмка (модель зовёт
@@ -220,9 +244,7 @@ def baseline_mode(root: Path, slug: str, n: str) -> int:
             f"квитанция {receipt.name} уже есть — baseline после prepare заморожен; "
             "пересъёмка ломает pin («Baseline изменён после подготовки»)"
         )
-    status = git_out(["status", "--porcelain", "--untracked-files=all", "--", ".", f":(exclude){ARTIFACTS_DIR}"], root)
-    if status is None:
-        raise SystemExit("git status не выполнился — база chunk'а не снята")
+    status = workspace_status(root) if snapshot_status is None else snapshot_status
     base = {}
     for ln in status.splitlines():
         path = ln[3:].strip()
@@ -234,7 +256,7 @@ def baseline_mode(root: Path, slug: str, n: str) -> int:
     target = d / f".chunk-{n}-baseline.json"
     target.write_text(json.dumps(base, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"baseline": target.name, "dirty_files": sorted(base)}, ensure_ascii=False))
-    if base:
+    if snapshot_status is None and base:
         print(f"дерево грязное: {len(base)} чужих незакоммиченных файлов — назови их человеку до правок")
     return 0
 
@@ -263,12 +285,11 @@ def compare_mode(root: Path, slug: str, n: str, k1: str, k2: str) -> int:
 def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
     d = root / ARTIFACTS_DIR / slug
     base, snapshot = snapshot_base.load(root, d)
-    base_sha = base['id'] if base['kind'] == 'git' else None
     patch, tests_out, evidence = paths_for(d, n, k)
     if not patch.exists():
         print(json.dumps({"error": f"нет {patch.name} — верификация не начинается"}, ensure_ascii=False))
         return 2
-    current = regenerate_diff(root, base_sha, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
+    current = current_diff(root, d, base, snapshot)
     patch_text = read_bytes_text(patch)
     patch_hash = sha256(patch_text)
     rec = json.loads(evidence.read_text(encoding="utf-8")) if evidence.exists() else None
@@ -311,7 +332,10 @@ def main() -> int:
     for mode in ('preflight', 'run-gate'):
         runner = sub.add_parser(mode)
         runner.add_argument('root'); runner.add_argument('slug'); runner.add_argument('n'); runner.add_argument('k')
-        runner.add_argument('--command', required=True); runner.add_argument('--layer')
+        selector = runner.add_mutually_exclusive_group(required=True)
+        selector.add_argument('--command')
+        selector.add_argument('--gate', help='Имя включённого гейта этапа 6 из gates.md')
+        runner.add_argument('--layer')
         runner.add_argument('--phase', choices=('chunk', 'verify'), default='verify')
     b = sub.add_parser("baseline")
     b.add_argument("root"); b.add_argument("slug"); b.add_argument("n")
@@ -331,12 +355,24 @@ def main() -> int:
     if not re.fullmatch(r'[\w.-]+', a.slug) or a.slug in ('.', '..'):
         raise ValueError('Недопустимый slug')
     if a.mode in ('preflight', 'run-gate'):
-        context = gate_context(root, root / ARTIFACTS_DIR / a.slug, a.command, a.n, a.k, a.layer,
-                               allow_pending_patch=a.mode == 'preflight' and a.phase == 'chunk')
+        d = root / ARTIFACTS_DIR / a.slug
+        pending = a.mode == 'preflight' and a.phase == 'chunk'
+        command = gate_evidence.gate_command(root, a.gate) if a.gate else a.command
+        if a.gate:
+            context = gate_evidence.configured_context(root, d, a.gate, command, a.n, a.k, a.layer, pending)
+        else:
+            context = gate_context(root, d, command, a.n, a.k, a.layer, allow_pending_patch=pending)
         if a.mode == 'preflight':
             print(json.dumps({'status': 'configured', 'inputs': context}, ensure_ascii=False))
             return 0
-        rc, output = run_shell(a.command, root, env={**os.environ, **context})
+        if a.gate:
+            if a.phase != 'verify':
+                raise ValueError('Именованный запуск с квитанцией выполняется на Verify')
+            rc, output, receipt = gate_evidence.run(root, d, a.n, a.k, a.gate, command, context, a.layer,
+                                                   lambda: current_revision(root, d))
+            print(f'Квитанция гейта: {receipt.relative_to(d)}', file=sys.stderr)
+        else:
+            rc, output = run_shell(command, root, env={**os.environ, **context})
         print(output, end='')
         return rc
     if a.mode == 'prepare':
@@ -344,8 +380,15 @@ def main() -> int:
         d = root / ARTIFACTS_DIR / a.slug
         base, snapshot = snapshot_base.load(root, d)
         current = regenerate_diff(root, base['id'], canonical=True, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
+        snapshot_status = None
+        if snapshot is not None:
+            snapshot_status = workspace_status(root)
+            print(f'Отличия рабочего дерева от Git HEAD: {len(snapshot_status.splitlines())} путей')
+            paths = diffstat(current)['paths']
+            print(f'Изменения относительно снимка: {len(paths)} путей' + (': ' + ', '.join(paths) if paths else ''))
         receipt = chunk_preconditions.create(root, d, a.n, a.locator, current,
-                                              lambda: baseline_mode(root, a.slug, a.n), profile=profile)
+                                              lambda: baseline_mode(root, a.slug, a.n, snapshot_status),
+                                              profile=profile)
         print(json.dumps(receipt, ensure_ascii=False))
         return 0
     if a.mode == 'snapshot':

@@ -121,7 +121,7 @@ TaskLoop означает только готовность к ревью; hando
 `tools/flow-verdict.py` без прогона этого корпуса не коммитится. Кейсы: три исторических
 (`attempt-gap`, `gates-placeholder`, `passed-table-mismatch` — по находкам живых витков), зелёный
 эталон `green`, по кейсу на ветку вердикта (`plan-unapproved`, `skip-unexcused`, `sdlc-in-scope`,
-`gate-enabled-after-report`, `chunk-oversize`, `axes-outcome-dangling`, `axes-quoted-reason`,
+`gate-enabled-after-report`, `gate-receipts-missing`, `chunk-oversize`, `axes-outcome-dangling`, `axes-quoted-reason`,
 `review-md-ignored`, `verification-claims-mismatch`), два кейса режима `--at handoff` (`handoff-green`, `handoff-two-loops`) и
 `example` — канонический пример репозитория, который не копируется в корпус, а материализуется из
 `example/` через `case.json` (`{"mode", "source", "slug"}`; `mode` — verify|handoff, `source` —

@@ -40,7 +40,7 @@ MARKERS = [
     (r"@pytest\.mark\.skip", "pytest: @pytest.mark.skip"), (r"@unittest\.skip", "unittest: @unittest.skip"),
     (r"pytest\.skip\s*\(", "pytest: pytest.skip("), (r"\bt\.Skip\w*\s*\(", "go: t.Skip"),
     (r"#\[ignore\]", "rust: #[ignore]"), (r"\[Ignore\b", "nunit/mstest: [Ignore"),
-    (r"\bmarkTestSkipped\s*\(", "phpunit: markTestSkipped"), (r"\bxcontext\b|\bxit\b|\bpending\b", "rspec: xit/pending"),
+    (r"\bmarkTestSkipped\s*\(", "phpunit: markTestSkipped"),
     (r"\bskip\s*[=:]\s*true\b", "skip = true"), (r"^\s*@?skip\b", "generic: skip"),
     (r"--skip\b", "cli: --skip"), (r"\bexclude(?:Tags|Groups|TestsMatching)?\s*(?:[\(=]|['\"])", "gradle/junit: exclude"),
 ]
@@ -51,6 +51,11 @@ DECLARATIONS = [
 ]
 ASSERT_RE = re.compile(r"\b(assert\w*|expect|should|verify)\b")
 COMMENT_RE = re.compile(r"^\s*(#|//|/\*|\*|--|;)")
+JS_PENDING = (r"\b(?:pending|xcontext)\s*\(", "js/ts: pending/xcontext")
+RSPEC_MARKER = (r"\b(?:xcontext|xit)\b|\bpending(?:\s*\(|[ \t]+['\"]|[ \t]+do\b)"
+                r"|(?:^|[;{|]|\b(?:do|then)\b)[ \t]*pending\b"
+                r"(?=[ \t]*(?:[#;}]|\bend\b|$)|[ \t]+(?!\b(?:if|unless|while|until|and|or|rescue)\b)[\w@:$])",
+                "rspec: xit/pending")
 
 
 def lua_code(text, state=None):
@@ -141,10 +146,13 @@ def main() -> int:
     for path, ln, sign, text in hunks:
         if path in uncertain or sign != "+" or not (is_test_or_config_path(path) or extra_test(path)):
             continue
-        for rx, label in MARKERS:
-            # RSpec-маркеры относятся к Ruby. Литералы других языков не отключают RSpec.
-            if label.startswith('rspec:') and Path(path).suffix != '.rb':
-                continue
+        suffix = Path(path).suffix.lower()
+        specific = []
+        if test_path(path) and suffix in ('.js', '.ts', '.jsx', '.tsx'):
+            specific.append(JS_PENDING)
+        if suffix == '.rb':
+            specific.append(RSPEC_MARKER)
+        for rx, label in (*MARKERS, *specific):
             if re.search(rx, text):
                 evidence.append(f"{path}:{ln} — маркер отключения/фокуса ({label}): {text.strip()[:80]}")
                 break

@@ -216,10 +216,23 @@ class AntiBypassTests(Base):
         rc, res, _ = run("anti_bypass.py", java, "--test-path", "server/src/test/**/*.java")
         self.assertEqual((rc, res["status"]), (0, "pass"))
         # настоящий RSpec pending в .rb по-прежнему обнаруживается
-        rb = self.write_patch({"spec/order_spec.rb": (["x"], ["x", "it('works') { pending }"])})
-        rc, res, _ = run("anti_bypass.py", rb)
-        self.assertEqual(rc, 1)
-        self.assertIn("rspec", res["evidence"][0])
+        for line in ("it('works') { pending }", "  pending reason"):
+            rb = self.write_patch({"spec/order_spec.rb": (["x"], ["x", line])})
+            rc, res, _ = run("anti_bypass.py", rb)
+            self.assertEqual(rc, 1)
+            self.assertIn("rspec", res["evidence"][0])
+
+    def test_pending_calls_in_javascript_and_local_value_in_ruby(self):
+        for suffix in ('js', 'ts', 'jsx', 'tsx'):
+            with self.subTest(suffix=suffix):
+                p = self.write_patch({f'tests/widget.spec.{suffix}': (
+                    ['old'], ['old', "it('works', () => { pending('later'); });"])})
+                rc, result, _ = run('anti_bypass.py', p)
+                self.assertEqual((rc, result['status']), (1, 'fail'))
+                self.assertIn('js/ts: pending', result['evidence'][0])
+        p = self.write_patch({'test/test_widget.rb': (['old'], ['old', 'pending = 1', 'assert_equal 1, pending'])})
+        rc, result, _ = run('anti_bypass.py', p)
+        self.assertEqual((rc, result['status']), (0, 'pass'))
 
     def test_production_code_is_not_scanned_for_markers(self):
         for line in ["Model.objects.exclude(deleted=True)", "stream.skip(1)", "const pending = []",

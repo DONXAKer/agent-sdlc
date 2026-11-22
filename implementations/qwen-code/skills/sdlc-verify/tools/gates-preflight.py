@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sdlc_common import ARTIFACTS_DIR, command_of, command_tokens, enabled_gates, gate_configuration_errors, read  # noqa: E402
+from sdlc_common import ARTIFACTS_DIR, command_of, command_tokens, defect_class_catalog, enabled_gates, gate_configuration_errors, read  # noqa: E402
 
 INTERPRETERS = {"python", "python3", "py", "node", "bash", "sh"}
 BUILTINS = {"true", "false", "echo", "cd", "export", "set", "test"}
@@ -67,9 +67,12 @@ def preflight(root: Path, stage: str = "этап 6", builtin_review=False, slug=
     gates = root / ARTIFACTS_DIR / "gates.md"
     if not gates.exists():
         return None
+    text = read(gates, "")
+    problems = gate_configuration_errors(text, root=root, slug=slug)
+    problems.extend(("Классы дефектов проекта", error) for error in defect_class_catalog(text)['errors'])
     rows = [{"gate": name, "command": None, "status": "invalid-command", "detail": detail}
-            for name, detail in gate_configuration_errors(read(gates, ""), root=root, slug=slug)]
-    for name, _, how in enabled_gates(read(gates, ""), stage):
+            for name, detail in problems]
+    for name, _, how in enabled_gates(text, stage):
         cmd = command_of(how)
         if cmd is None:
             if name == "Ревью независимым агентом" and builtin_review:

@@ -161,6 +161,24 @@ def preparation_checks(intent, plan, readiness, small=False):
         (set().union(*(claims_in(row.split("|")[1]) for row in rows)) == ci if rows else False,
          'все claim-ID заданы строками таблицы', 'claim-ID вне канонической таблицы'),
     ]
+    cards = re.split(r'^### Шаг [1-9]\d*\s+[^\n]+\n', plan or '', flags=re.M)[1:]
+    supports, closes, malformed = set(), set(), False
+    for card in cards:
+        card = re.split(r'^#{1,3} +', card, maxsplit=1, flags=re.M)[0]
+        direct = [value.strip() for value in re.findall(r'^- закрывает:[^\S\n]*([^\n]*)', card, re.M)]
+        related = re.findall(r'^- обеспечивает проверку:[^\S\n]*([^\n]*)', card, re.M)
+        if related:
+            ids = claims_in(related[0])
+            malformed |= len(related) != 1 or direct != ['нет'] or not ids
+            supports.update(ids)
+        elif direct:
+            closes.update(claims_in(direct[0]))
+    if supports or malformed:
+        deferred = re.search(r'^- \*\*Уходит следующим chunk.ам:\*\*([^\n]+)', plan, re.M)
+        uncovered = supports - closes - claims_in(deferred[1] if deferred else '')
+        checks.append((not malformed and not uncovered, 'вспомогательные шаги обеспечивают проверку',
+                       'укажи «закрывает: нет» и известные claim-ID; '
+                       f'без закрывающего шага или явного переноса: {sorted(uncovered)}'))
     if not small:
         checks.append((len(rows) >= 3 and sum('[edge]' in row for row in rows) >= 2,
                        'полный контур: ≥3 пунктов, ≥2 [edge]', 'недостаточно строк или граничных случаев'))

@@ -109,6 +109,24 @@ class PreflightTests(unittest.TestCase):
         rows = self.mod.preflight(self.root, "этап 6")
         self.assertEqual([r["status"] for r in rows if r["gate"] == "Сборка"], ["no-command"])
 
+    def test_preflight_checks_project_defect_class_declarations(self):
+        for value, expected in (('- своих классов нет', 0), ('- `сбой индекса` — 2026-08-01', 0),
+                                ('- сбой индекса без даты', 1)):
+            with self.subTest(value=value):
+                self.write_gates('git --version')
+                path = self.root / '.sdlc/gates.md'
+                text = path.read_text(encoding='utf-8') + '\n## Классы дефектов проекта\n\n' + value + '\n'
+                path.write_text(text, encoding='utf-8')
+                result = subprocess.run([sys.executable, str(PREFLIGHT), str(self.root), '--json', '--builtin-review'],
+                                        capture_output=True, text=True, encoding='utf-8')
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                if expected:
+                    report = json.loads(result.stdout)
+                    self.assertTrue(report['configuration_error'])
+                    self.assertFalse(report['blocked_env'])
+                    row = next(row for row in report['rows'] if row['gate'] == 'Классы дефектов проекта')
+                    self.assertIn(value, row['detail'])
+
     def test_template_hints_do_not_trigger_blocked_env(self):
         # канонический шаблон набора со всеми «да» не должен давать blocked_env из-за подсказок
         tpl = (REPO / "templates" / "gates.template.md").read_text(encoding="utf-8")

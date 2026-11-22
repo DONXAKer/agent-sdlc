@@ -30,10 +30,11 @@ from sdlc_common import (  # noqa: E402  — константы и разбор:
     MANDATORY_GATES as MANDATORY_FALLBACK, PLACEHOLDER, attempt_nums as _attempt_nums, claims_in as _claims_in,
     plan_approved, approval_line, size_explained, gate_configuration_errors, patch_files, DIFF_GIT, unquote_git_path, preparation_checks,
     readiness_verdict, readiness_ok, diffstat, defect_class_catalog, defect_class_name, axis_outcome_kind,
-    enabled as switch_enabled, gate_rows, dictionary_value,
+    enabled as switch_enabled, gate_rows, dictionary_value, command_of,
 )
 import snapshot_base
 import chunk_preconditions
+import gate_evidence
 
 DEFAULT_BUDGET = str(_DEFAULT_BUDGET)  # норма SDLC.md → этап 6; шаблон журнала сверяет tools/check-consistency.py
 
@@ -56,6 +57,11 @@ def natsorted(paths):
     """attempt-10 позже attempt-9, а не раньше attempt-2."""
     return sorted(paths, key=lambda p: [int(t) if t.isdigit() else t
                                         for t in re.split(r"(\d+)", p.name)])
+
+
+def report_paths(d):
+    return natsorted(p for p in d.glob('verification-report-*-attempt-*.md')
+                     if re.fullmatch(r'verification-report-[1-9]\d*-attempt-[1-9]\d*\.md', p.name))
 
 
 def read(p: Path):
@@ -116,6 +122,17 @@ def action_of(report: str) -> str:
     артефакт может содержать историю, действует свежая запись."""
     vals = ACTION_RE.findall(report or "")
     return vals[-1] if vals else "none"
+
+
+def retry_instruction_errors(report):
+    if action_of(report) != 'retry':
+        return []
+    values = re.findall(r'^[^\S\n]*(?:[-*] +)?\*\*retry_instruction:\*\*[^\S\n]*([^\n]*)', report, re.M)
+    value = re.sub(r'[`*_]', '', values[-1]).strip() if values else ''
+    placeholder = r'(?:н\s*/\s*п|n\s*/\s*a|нет|none|не применимо|не указано|todo|tbd|[-—–.…]+)'
+    if not value or '‹' in value or re.fullmatch(rf'{placeholder}(?:\s*/\s*{placeholder})*', value, re.I):
+        return ['Заполни retry_instruction конкретным действием в отчёте текущей попытки']
+    return []
 
 
 def journal_chunk_num(p: Path):
@@ -197,6 +214,11 @@ def gate_row_in(report: str, gate: str) -> bool:
     return re.search(rf"^\|\s*{re.escape(gate)}\s*\|", report, flags=re.M) is not None
 
 
+def gate_passed(report, gate):
+    return any('✅' in row_glyphs(status) for status in
+               re.findall(rf'^\|[ \t]*{re.escape(gate)}[ \t]*\|([^|\n]*)\|', report, re.M))
+
+
 def row_glyphs(ln: str) -> set:
     """Статусные глифы, которые несёт эта строка таблицы — первые непробельные
     символы её `|`-ячеек после снятия обрамления `*`/`` ` ``/`_` и variation
@@ -270,13 +292,18 @@ def do_print(what: str, root: Path, slug: str) -> int:
     d = root / ".sdlc" / slug
     journals = natsorted(d.glob("chunk-*-journal.md"))
     j = read(journals[-1]) if journals else None
-    reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
+    reports = report_paths(d)
     chunk = (journal_chunk_num(journals[-1]) if journals else None) or "1"
+    report = (read(reports[-1]) or '') if reports else ''
+    retry_problems = retry_instruction_errors(report)
+    if what in ('all', 'action') and retry_problems:
+        print(f'❌ {reports[-1].name}: {retry_problems[0]}', file=sys.stderr)
+        return 1
     vals = {
         "budget": lambda: budget_of(j),
         "attempts": lambda: len(attempt_nums(j)),
         "chunk": lambda: chunk,
-        "action": lambda: action_of(read(reports[-1]) if reports else ""),
+        "action": lambda: action_of(report),
         "approved": lambda: "yes" if plan_approved(read(d / "plan.md") or "") else "no",
         "readiness2": lambda: "yes" if readiness_ok(read(d / "readiness.md") or "", 2) else "no",
         # число отчётов приёмки: раннер НЕ глобит имена сам — формат имён знает только этот файл
@@ -313,13 +340,14 @@ def do_metrics(root: Path) -> int:
         if not (d / "intent.md").exists():
             continue
         journals = natsorted(d.glob("chunk-*-journal.md"))
-        reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
+        reports = report_paths(d)
         j = read(journals[-1]) if journals else None
         nums = attempt_nums(j) if j else []
         first_pass = next((index for index, report in enumerate(reports, 1)
                            if confirmed_verify(d, report)), None)
         textual = any(re.search(r'\*\*passed:\*\*\s*true', read(p) or '') for p in reports)
         ho = read(d / "handoff.md")
+        status = handoff_status(d, ho, reports)
         classes = set()
         for value in re.findall(r'^-\s*\*\*Класс:\*\*[^\S\n]*([^\n]*)', ho or '', re.M):
             name, diagnostic = defect_class_name(value, catalog)
@@ -330,17 +358,20 @@ def do_metrics(root: Path) -> int:
         rows.append(dict(
             slug=d.name, attempts=len(nums), reports=len(reports),
             budget=budget_of(j) if j else "-", passed_at=first_pass,
-            handoff=ho is not None, classes=classes, unconfirmed=textual and first_pass is None,
+            handoff=status, classes=classes, unconfirmed=textual and first_pass is None,
             first=bool(reports) and reports[0].name == 'verification-report-1-attempt-1.md'
                   and first_pass == 1 and first_verify_succeeded(d, reports[0]),
         ))
     if not rows:
         print("витков в .sdlc/ не найдено")
         return 0
-    done = [r for r in rows if r["handoff"]]
+    done = sum(r['handoff'] == 'accepted' for r in rows)
+    interrupted = sum(r['handoff'] == 'interrupted' for r in rows)
+    missing = sum(r['handoff'] == 'missing' for r in rows)
     first = [r for r in rows if r['first']]
     reached = [r for r in rows if r["passed_at"] is not None]
-    print(f"Витков: {len(rows)} · завершённых handoff'ом: {len(done)}")
+    print(f'Витков: {len(rows)} · успешно завершено: {done} · незавершённых: {len(rows) - done}')
+    print(f'Незавершённых с handoff: {interrupted} · без handoff: {missing}')
     print(f"Подтверждённый verify с первой попытки: {len(first)}/{len(rows)}")
     print(f"Подтверждённый успешный verify: {len(reached)}/{len(rows)}")
     print(f"Текстовый passed=true без подтверждения: {sum(r['unconfirmed'] for r in rows)}/{len(rows)}")
@@ -360,6 +391,21 @@ def do_metrics(root: Path) -> int:
     for diagnostic in diagnostics:
         print('Диагностика классов: ' + diagnostic)
     return 0
+
+
+def handoff_status(d, handoff, reports):
+    if not (handoff or '').strip():
+        return 'missing'
+    loops = re.split(r'^## Виток ', handoff, flags=re.M)
+    recent = loops[-1]
+    accepted = re.search(r'^- \*\*Приёмка:\*\*\s*принял(?:а|и)?\s+[^\n·]+\s*·\s*\d{4}-\d{2}-\d{2}\s*$', recent, re.M | re.I)
+    state = re.search(r'^## Состояние \(машиночитаемое\)[ \t]*\n\s*```yaml[ \t]*\n(.*?)^```[ \t]*$', recent, re.M | re.S)
+    if accepted and state and reports and confirmed_verify(d, reports[-1]):
+        n, k = re.findall(r'\d+', reports[-1].name)
+        if all([item.strip() for item in re.findall(rf'^{field}:[ \t]*([^#\n]*)', state[1], re.M)] == [value]
+               for field, value in (('verdict', 'passed'), ('chunk', n), ('attempts', k))):
+            return 'accepted'
+    return 'interrupted'
 
 
 def verify_receipt(d, report, result):
@@ -411,25 +457,79 @@ def first_verify_succeeded(d, report):
         return False
 
 
-def defect_record_errors(d, handoff):
-    """Не превращай любой failed-отчёт в дефект. Требуй подтверждённую находку или явную запись."""
+def review_validator():
     import importlib.util
     spec = importlib.util.spec_from_file_location('defect_review', Path(__file__).with_name('review-validate.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def confirmed_review_path(module, d, rec, n, k):
+    path = module.confirmed_answer(d, rec, n, k)
+    patch = chunk_preconditions.artifact(d, f'chunk-{n}-attempt-{k}-diff.patch')
+    if (rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
+            or rec.get('chunk') != n or rec.get('attempt') != k
+            or rec.get('review_sha256') != snapshot_base.digest(path.read_bytes())
+            or rec.get('patch_sha256') != snapshot_base.digest(patch.read_bytes())):
+        raise ValueError('Хэши или область подтверждённого ревью изменены')
+    return path
+
+
+def uses_gate_receipts(d, n):
+    try:
+        value = json.loads(chunk_preconditions.receipt_path(d, n).read_bytes())
+        return isinstance(value, dict) and value.get('version') == chunk_preconditions.PREPARE_VERSION
+    except (OSError, ValueError):
+        return False  # повреждённую квитанцию отклоняет проверка предусловий
+
+
+def review_report_errors(d, report_path, report):
+    name = 'Ревью независимым агентом'
+    if not gate_passed(report, name):
+        return []
+    n, k = map(int, re.findall(r'\d+', report_path.name))
+    validation = d / f'.review-validation-{n}-attempt-{k}.json'
+    if validation.exists() or validation.is_symlink():
+        try:
+            module = review_validator()
+            rec = json.loads(chunk_preconditions.artifact(d, validation.name).read_bytes())
+            path = confirmed_review_path(module, d, rec, n, k)
+            review, error = module.extract_json(read(path) or '')
+            if error or not isinstance(review, dict):
+                raise ValueError(error or 'Подтверждённый ответ ревью должен быть объектом')
+            if any(review.get(section) for section in ('findings', 'scope', 'invariants', 'regressions')):
+                return ['Квитанция этой попытки подтверждает ответ с блокирующей находкой']
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            return [f'Квитанция ревью этой попытки не подтверждена: {error}']
+    if action_of(report) not in ('retry', 'escalate'):
+        return []
+    placeholders = r'(?:н\s*/\s*п|нет|не применимо|отсутствует)(?:[.:]|\s+[—–-].*)?'
+    for section in md_sections(report):
+        if section.startswith('2. Ревью:'):
+            for value in re.findall(r'^- (?:Подтверждённое расхождение|Поведение, не покрытое ни одним пунктом):[ \t]*([^\n]+)', section, re.M):
+                if not re.fullmatch(placeholders, value.strip().strip('*_`'), re.I):
+                    return ['Раздел ревью отчёта фиксирует блокирующее замечание']
+    cause = re.search(r'\*\*По каким условиям упал:\*\*[ \t]*([^\n]*)', report)
+    failure = r'(?:❌|⚠|не\s+прош\w*|провал\w*|упал\w*|блокирующ\w*)'
+    review_cause = rf'(?:^|[;,])[ \t]*{re.escape(name)}(?:[ \t]*(?:$|[;,.])|[ \t]*[:—-]?[ \t]*{failure})'
+    blocker = r'(?:^|[;,])[ \t]*(?:есть[ \t]+)?блокирующ\w+[ \t]+(?:замечани\w+|находк\w+)[ \t]+(?:независим\w+[ \t]+)?ревью'
+    if cause and (re.search(review_cause, cause[1], re.I) or re.search(blocker, cause[1], re.I)):
+        return ['Отчёт называет независимое ревью причиной возврата или эскалации']
+    return []
+
+
+def defect_record_errors(d, handoff):
+    """Не превращай любой failed-отчёт в дефект. Требуй подтверждённую находку или явную запись."""
+    module = review_validator()
     required, history_errors = set(), []
     catalog = defect_class_catalog(read(d.parent / 'gates.md') or '')
+    history_errors.extend(catalog['errors'])
     for validation in d.glob('.review-validation-*-attempt-*.json'):
         try:
             n, k = map(int, re.findall(r'\d+', validation.name))
             rec = json.loads(validation.read_bytes())
-            review_path = module.confirmed_answer(d, rec, n, k)
-            patch_path = d / f'chunk-{n}-attempt-{k}-diff.patch'
-            if (rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
-                    or rec.get('chunk') != n or rec.get('attempt') != k
-                    or rec.get('review_sha256') != snapshot_base.digest(review_path.read_bytes())
-                    or rec.get('patch_sha256') != snapshot_base.digest(patch_path.read_bytes())):
-                raise ValueError('Хэши или область подтверждённого ревью изменены')
+            confirmed_review_path(module, d, rec, n, k)
         except (OSError, ValueError, TypeError, AttributeError) as error:
             history_errors.append(f'История подтверждённого ревью повреждена: {validation.name}: {error}')
     for path in d.glob('chunk-*-attempt-*-review.md'):
@@ -456,18 +556,14 @@ def defect_record_errors(d, handoff):
             claim_ids = claims_in(read(archived_intent if archived_intent.exists() else d / 'intent.md') or '')
             if validation.exists():
                 rec = json.loads(validation.read_bytes())
-                if (module.confirmed_answer(d, rec, n, k) != path
-                        or rec.get('tool') != 'review-validate.py' or rec.get('slug') != d.name
-                        or rec.get('chunk') != n or rec.get('attempt') != k
-                        or rec.get('review_sha256') != snapshot_base.digest(path.read_bytes())
-                        or rec.get('patch_sha256') != snapshot_base.digest(patch.read_bytes())):
+                if confirmed_review_path(module, d, rec, n, k) != path:
                     continue
                 claim_ids = set(rec['claim_ids'])
                 primary_paths = set(rec['primary_paths'])
             errors, _ = module.validate(review, claim_ids,
                                          set(diffstat(patch.read_bytes().decode('utf-8', errors='surrogateescape'))['paths']),
                                          primary_paths=primary_paths, artifact_paths=artifact_paths)
-        except (ValueError, TypeError, KeyError, AttributeError):
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
             continue
         if errors:
             continue
@@ -477,7 +573,7 @@ def defect_record_errors(d, handoff):
                          or finding.get('kind') == 'mismatch' and review.get('claims')
                          and all(c.get('status') == 'passed' for c in review['claims']))):
                 required.add(f'{path.name}#{snapshot_base.digest(finding["summary"].encode("utf-8"))[:16]}')
-    for report in d.glob('verification-report-*-attempt-*.md'):
+    for report in report_paths(d):
         required.update(re.findall(r'^- \*\*Проскочивший дефект:\*\*\s*(\S+)', read(report) or '', re.M))
     blocks = re.split(r'(?=^- \*\*Имя:\*\*)', handoff or '', flags=re.M)[1:]
     errors, covered = list(history_errors), set()
@@ -490,7 +586,6 @@ def defect_record_errors(d, handoff):
         if values['Имя'] in ('нет', 'н/п', ''):
             continue
         class_name, class_error = defect_class_name(values['Класс'], catalog)
-        errors.extend(catalog['errors'])
         if class_error:
             errors.append(class_error)
         if class_name is None:
@@ -611,7 +706,7 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     plan = texts.get("plan.md")
     handoff = texts.get("handoff.md")
     journals = natsorted(d.glob("chunk-*-journal.md"))
-    reports = natsorted(d.glob("verification-report-*-attempt-*.md"))
+    reports = report_paths(d)
     last_report = texts.get(reports[-1].name) if reports else None
     diffs = natsorted(d.glob("chunk-*-attempt-*-diff.patch"))
     tests_out = natsorted(d.glob("chunk-*-attempt-*-tests.txt"))
@@ -740,8 +835,10 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
                     f"минимум: «{g}» включён", "строки нет или в ней не «да» / «да — минимум»",
                     "обязательный минимум выключен среди витка — набор не собран")
     if gates and last_report:
-        enabled = [name for name, on, stage, _ in gate_rows(gates)
+        enabled = [(name, command_of(how)) for name, on, stage, how in gate_rows(gates)
                    if stage == 'этап 6' and switch_enabled(on)]
+        n, k = map(int, re.findall(r'\d+', reports[-1].name))
+        require_receipts = uses_gate_receipts(d, n)
         header = next((ln for ln in last_report.splitlines() if "Набор гейтов:" in ln), "")
         _m = re.search(r"(\d{4}-\d{2}-\d{2})", header)
         report_gates_date = _m.group(1) if _m else None
@@ -758,7 +855,7 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
             g, date, reason = m.group(2).strip(), m.group(1), m.group(4)
             if date >= enabled_rows.get(g, ("", ""))[0]:
                 enabled_rows[g] = (date, reason)
-        for g in enabled:
+        for g, command in enabled:
             date, reason = enabled_rows.get(g, ("", ""))
             # позже даты набора из отчёта — введён после; та же дата различима только по причине:
             # запись ссылается на ТЕКУЩИЙ виток целым словом (slug-подстрока не считается)
@@ -771,6 +868,10 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
                 continue
             v.check(gate_row_in(last_report, g), f"строка гейта «{g}» в отчёте", "строки нет",
                     "включённый гейт без строки — сверка отчёта с набором должна быть механической")
+            if require_receipts and gate_evidence.needs_receipt(g, command) and gate_passed(last_report, g):
+                problems = gate_evidence.errors(root, d, n, k, g)
+                v.check(not problems, f'квитанция гейта «{g}», chunk {n}, попытка {k}', '; '.join(problems),
+                        'прогони гейт по патчу текущей попытки и сохрани результат через run-gate --gate')
         v.check(bool(re.search(r"\*\*passed:\*\*", last_report)), "вердикт в отчёте",
                 "поля **passed:** нет", "вердикт не посчитан")
 
@@ -778,6 +879,17 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
     # Единственное правило, ради которого существует этап 6 (SDLC.md → таблица вердикта), само
     # никогда не проверялось механически: passed=true проходило и при ❌/⚠ в таблицах отчёта.
     if last_report:
+        if not full:
+            problems = retry_instruction_errors(last_report)
+            if problems:
+                v.fail(f'инструкция retry ({reports[-1].name})', '; '.join(problems),
+                       'дополни отчёт, повтори Verify с тем же номером попытки')
+        for report in reports if full else reports[-1:]:
+            body = texts.get(report.name) or ''
+            problems = review_report_errors(d, report, body)
+            if problems:
+                v.fail(f'статус независимого ревью ({report.name})', '; '.join(problems),
+                       'согласуй строку гейта с ответом ревьюера этой попытки и причиной отрицательного вердикта')
         m = re.search(r"\*\*passed:\*\*\s*(true|false)", last_report)
         claimed = m.group(1) if m else None
         rows = [ln for ln in last_report.splitlines() if ln.strip().startswith("|")]
@@ -962,7 +1074,7 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
 def main(root: Path, slug: str, at: str = 'handoff') -> int:
     result = check_flow(root, slug, at)
     d = root / '.sdlc' / slug
-    reports = natsorted(d.glob('verification-report-*-attempt-*.md'))
+    reports = report_paths(d)
     if at == 'verify' and reports and not (d / 'state.json').exists() and not (d / 'state.json').is_symlink():
         verify_receipt(d, reports[-1], result)
     return result

@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import snapshot_base
-from sdlc_common import CHUNK_FILES, plan_approved, size_explained, files_to_touch, patch_files, read, preparation_checks, artifact_targets
+from sdlc_common import ARTIFACTS_DIR, CHUNK_FILES, artifact_targets, defect_class_catalog, files_to_touch, patch_files, plan_approved, preparation_checks, read, size_explained
+
+PREPARE_VERSION = 2
 
 
 def receipt_path(d, n):
@@ -41,6 +43,8 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
     intent, readiness = read(d / 'intent.md', ''), read(d / 'readiness.md', '')
     problems = [f'{name}: {detail}' for ok, name, detail in
                 preparation_checks(intent, plan, readiness, contour(intent) == 'мелкий') if not ok]
+    catalog = defect_class_catalog(read(root / ARTIFACTS_DIR / 'gates.md', ''))
+    problems.extend(f'Классы дефектов проекта: {error}' for error in catalog['errors'])
     if problems:
         raise ValueError('; '.join(problems))
     planned = set(files_to_touch(plan))
@@ -83,7 +87,7 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
         path = snapshot_base.safe_path(root, name)
         if not path.is_file() or snapshot_base.digest(path.read_bytes()) != digest:
             raise ValueError('Dirty-база изменилась после baseline; предусловия не доказаны')
-    record = {'version': 1, 'tool': 'attempt-evidence.py prepare', 'status': 'ready', 'artifact_targets': targets,
+    record = {'version': PREPARE_VERSION, 'tool': 'attempt-evidence.py prepare', 'status': 'ready', 'artifact_targets': targets,
               'profile': profile,
               'slug': d.name, 'chunk': int(n), 'base': base,
               'plan_sha256': text_digest(d / 'plan.md'),
@@ -149,10 +153,17 @@ def errors(root, d, n, expected_hash=None, historical=False):
         rec = json.loads(raw)
         if expected_hash is not None and snapshot_base.digest(raw) != expected_hash:
             return ['Квитанция изменена после записи evidence']
-        if (rec.get('version') != 1 or rec.get('tool') != 'attempt-evidence.py prepare' or rec.get('status') != 'ready'
-                or rec.get('slug') != d.name or rec.get('chunk') != int(n)
-                or rec.get('contour') not in ('мелкий', 'полный')):
+        if (rec.get('tool') != 'attempt-evidence.py prepare' or rec.get('status') != 'ready'
+                or rec.get('slug') != d.name or rec.get('chunk') != int(n)):
             return ['Недопустимая квитанция предусловий']
+        version = rec.get('version')
+        if type(version) is not int or version not in (1, PREPARE_VERSION):
+            return [f'Неподдерживаемая версия квитанции prepare: {version!r}; ожидается v{PREPARE_VERSION}']
+        if version == 1 and 'contour' not in rec:
+            return [f'Квитанция prepare v1 без contour несовместима с профилем v{PREPARE_VERSION}; '
+                    'проверь архив исходным комплектом, выпустившим квитанцию']
+        if rec.get('contour') not in ('мелкий', 'полный'):
+            return [f'Квитанция prepare v{version}: недопустимое поле contour']
         base, _ = snapshot_base.load(root, d)
         if rec.get('artifact_targets', []) != artifact_targets(root, d):
             return ['Цели .sdlc изменились после prepare']

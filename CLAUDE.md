@@ -1,29 +1,24 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Правила для работы Claude Code в репозитории Agent-SDLC.
 
 ## Что это за репозиторий
 
-Документация методологии **Agent-SDLC** — как разрабатывать с агентом так, чтобы работу можно было принять. Кода и системы сборки здесь нет: это Markdown-документы на русском языке. Новый контент пишется на русском, в тоне и терминологии существующих файлов.
-
-Цикл методологии (один проход = «виток»):
-
-```
-ЦЕЛЬ → РАЗВЕДКА → ВОПРОСЫ → ПЛАН → CHUNK → ВЕРИФИКАЦИЯ → COMMIT
-```
+Репозиторий содержит методологию, установочные комплекты и инструменты проверки. Пиши материалы по-русски.
 
 ## Структура
 
-- **`SDLC.md`** — вся методология одним файлом: семь этапов, гейты, вердикт, словарь терминов. Первоисточник; остальные файлы должны с ним сходиться.
-- **`templates/`** — **канонические** шаблоны артефактов витка, десять форм: intent, readiness, exploration-report, clarification-report, plan, acceptance-checks, chunk-journal, verification-report, handoff, gates.
-- **`implementations/claude-code/`** — рабочая реализация (плюс `hooks/sdlc-guard.py` — PreToolUse-hook границ scope и ревью, и единый ящик инструментов `skills/sdlc-verify/tools/`: `sdlc_common.py`, `flow-verdict.py`, `attempt-evidence.py`, `scaffold.py`, `gates-preflight.py`, `base-check.py`, `review-validate.py`, `intent-sections.py`, `gates/*.py`): девять скиллов `/sdlc-intent` … `/sdlc-handoff` + `/sdlc-seed` + `/sdlc-retro` (`skills/*/SKILL.md`) и четыре субагента с урезанными правами (`agents/sdlc-claims.md` — слепой вывод приёмочного листа, `agents/sdlc-locator.md` — read-only разведка, `agents/sdlc-reviewer.md` — независимое ревью, `agents/sdlc-methodologist.md` — независимый разбор методологии для `/sdlc-retro`).
+- Правила этапов находятся в [SDLC.md](SDLC.md), форматы инструментов — в [контракте реализации](implementation-contract.md).
+- Калибровка, наблюдатель и ретроспектива описаны в [проверке качества процесса](process-quality.md).
+- **`templates/`** — **канонические** шаблоны артефактов витка, включая протокол приёмки и ретроспективу.
+- **`implementations/`** — шесть установочных комплектов. Общие инструменты хранятся в `implementations/claude-code/skills/sdlc-verify/tools/`.
 - **`example/`** — обезличенный пример заполненных артефактов витка (Java/Spring). Идентификаторы и участники заменены нейтральными обозначениями. Виток **намеренно не принят** (ревью нашло дефект) — это часть примера, не ошибка. Артефактов этапа 5 (diff, вывод тестов) в примере нет намеренно: они порождаются кодовой базой витка.
 - **`retros/`** — рабочий каталог `/sdlc-retro` (ретроспектива методологии, вне витка); появляется при запуске скилла, в репозитории не хранится. Отчёт ретроспективы — черновик триажа, а не документ методологии: см. правило «ретроспектива закрывается правкой, а не файлом» ниже.
 
 ## Правила правок (сквозные инварианты)
 
 - **Каждый шаблон начинается строкой версии формы** `<!-- sdlc-template: <имя> vN -->`; правка, меняющая структуру (секции, колонки, строки-образцы), поднимает N — по нему инструменты и люди отличают артефакт, снятый старой формой.
-- **Шаблоны правятся только в корневом `templates/`**, затем разливаются скриптом `./sync-templates.sh` в `implementations/claude-code/skills/*/templates/` (`--check` — сверка). Копии в скиллах — установочные; правка «копия → корень» запрещена направлением. Тем же скриптом разливается `sdlc-constants.json` в `tools/` скилла `sdlc-verify`.
+- Правь формы в `templates/`. Затем выполни `python tools/distribution.py sync` и `python tools/distribution.py check`.
 - **Константы методологии живут в `sdlc-constants.json`** — минимум гейтов, перечень гейтов с этапами, оси прод-готовности, умолчание бюджета попыток, ориентир размера chunk'а, глифы статусов, словарь `action`, метки решений человека, таблица вердикта. Проза `SDLC.md`, шаблоны, скиллы и агенты обязаны с ним сходиться дословно, и у каждого ключа есть потребитель в коде или тексте — это проверяет `python tools/check-consistency.py`; инструменты читают установочную копию файла через `sdlc_common.py`, не хардкод.
 - Одни и те же имена и таблицы повторяются в нескольких файлах — при изменении методологии сверяй согласованность: `SDLC.md` ↔ `README.md` (таблица артефактов) ↔ `implementations/claude-code/README.md` (таблицы скиллов/агентов) ↔ `SKILL.md` скиллов ↔ шаблоны. Механическая часть этой сверки — `tools/check-consistency.py` (перечень гейтов, оси, числа, таблица вердикта, состав скиллов и агентов); что он не покрывает, сверяется глазами.
 - Термины и обозначения фиксированы и используются дословно: минимальный набор гейтов — «Сборка», «Тесты», «Scope: файлы вне плана», «Анти-обход тест-гейта», «Ревью независимым агентом»; пункты приёмки нумеруются `claim-1`, `claim-2`; незаполненное место — `‹…›`; «не применимо» — `н/п`; артефакты витка живут в `.sdlc/<slug>/`, артефакты попыток несут номер (`chunk-N-attempt-K-*`, `verification-report-N-attempt-K.md`).
@@ -33,33 +28,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Команды
 
-Сборки у документов нет, но проверки есть — прогонять после правок соответствующих зон:
+Выполни `python check.py` для проверки репозитория. Список отдельных проверок выводит `python check.py --list`.
+Корпус вердиктов обновляй через `python test/run-corpus.py --update` после проверки каждого изменения ожидаемого результата.
+Для полного прогона с реальными сессиями Claude используй `test/run-e2e.sh [dir]`.
 
-```bash
-python check.py                # ВСЕ проверки ниже одной командой (то же гоняет CI, .github/workflows/check.yml);
-                                # `make check` — алиас; --with-install добавляет ./install.sh --check
-./sync-templates.sh            # разлить корневые шаблоны и sdlc-constants.json в копии скиллов (после правки)
-./sync-templates.sh --check    # только сверить (гейт для CI)
-python tools/check-consistency.py   # согласованность SDLC.md ↔ шаблоны ↔ скиллы ↔ агенты ↔ README ↔ константы
-make -C test/fixture test      # тесты fixture-планировщика (16 шт.)
-python test/run-corpus.py      # регрессионный корпус flow-verdict.py (секунды, без токенов) —
-                                # правка tools/flow-verdict.py без зелёного прогона не коммитится;
-                                # --update переписывает expected.txt, только после того как
-                                # расхождение объяснено в теле коммита
-python test/seed-flow-verdict.py    # самопосев: каждая проверка flow-verdict.py либо убита корпусом,
-                                # либо записана долгом в test/seed-flow-verdict.known.txt (--report — только отчёт)
-python test/test_state_contract.py  # контракт state-first раннера
-python test/test_tools.py           # инструменты скиллов: gates-preflight.py, attempt-evidence.py
-python test/test_gates.py           # эталонные гейт-скрипты tools/gates/* — посев на каждый класс дефекта
-python test/test_base_check.py      # base-check.py: тесты попытки красные на базе, чужие падающие тесты
-python test/test_guard_and_review.py # hook sdlc-guard.py (границы scope и ревью) и review-validate.py
-python test/test_scaffold.py        # scaffold.py (бланк с механикой) и intent-sections.py (законные правки задачи)
-test/run-e2e.sh [dir]          # полный e2e-прогон флоу (дорого: реальные сессии claude)
-python test/verdict.py <run-dir> <slug>   # механический контракт флоу по готовым артефактам
-```
-
-На Windows `python3` может отсутствовать — все инструменты запускаются через `python`; вывод инструментов принудительно UTF-8 (консоль cp1251 роняла глифы статусов).
-
-Установка реализации — только через `./install.sh` (бэкап расходящихся глобальных версий +
-честная синхронизация sdlc-*; `--check` — сверка). Голый `cp -r` не использовать: он не удаляет
-убранные из репо файлы и молча затирает пользовательские правки.
+Устанавливай комплект по README соответствующей реализации. Для Claude Code используй `./install.sh` и `./install.sh --check`.

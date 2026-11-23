@@ -10,9 +10,33 @@ sys.path.insert(0, str(ROOT / 'implementations/claude-code/skills/sdlc-verify/to
 from sdlc_common import MANDATORY_GATES, preparation_checks, profile_gate_errors, task_profile
 sys.path.insert(0, str(ROOT))
 from test import test_snapshot_base as fixtures
+from test.test_issue_regressions import flow
+from tempfile import TemporaryDirectory
+from chunk_preconditions import receipt_path
 
 
 class TaskProfiles(unittest.TestCase):
+    def test_bugfix_and_legacy_acceptance_rows(self):
+        row = '| claim-1 | Пустой запрос отклонён | Проверить код ответа |'
+        readiness = '**Вердикт прогона 1:** готова\n**Вердикт прогона 2:** готова'
+        pilot = '**Профиль задачи:** bugfix\n' + row
+        for intent in (pilot, pilot + ' performance |'):
+            errors = [name for ok, name, _ in preparation_checks(intent, 'claim-1', readiness) if not ok]
+            self.assertEqual(errors, [])
+        legacy = '\n'.join((row, row.replace('claim-1', 'claim-2 [edge]'), row.replace('claim-1', 'claim-3 [edge]')))
+        self.assertTrue(all(ok for ok, _, _ in preparation_checks(legacy, 'claim-1 claim-2 claim-3', readiness)))
+        self.assertFalse(all(ok for ok, _, _ in preparation_checks(row, 'claim-1', readiness)))
+
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            paths = ['module/handler.py', 'module/validator.py', 'module/test_input.py']
+            patch = ''.join(f'diff --git a/{p} b/{p}\n--- a/{p}\n+++ b/{p}\n' for p in paths)
+            (directory / 'chunk-1-attempt-1-diff.patch').write_text(patch, encoding='utf-8')
+            compact = '**Контур:** мелкий\n'
+            self.assertTrue(flow.small_scope_errors(directory, compact + row))
+            receipt_path(directory, 1).write_text(json.dumps({'contour': 'мелкий', 'task_profile': 'bugfix'}), encoding='utf-8')
+            self.assertEqual(flow.small_scope_errors(directory, compact + pilot), [])
+
     def test_only_explicit_profile_replaces_quota(self):
         intent = '| claim-1 | результат | наблюдение |'
         for marker, quota in [('', True), ('**Профиль задачи:** feature', False)]:

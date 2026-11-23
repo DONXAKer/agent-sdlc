@@ -40,10 +40,10 @@ class RuntimeTests(unittest.TestCase):
         return {'runId': name, 'claim_id': 'claim-1',
                 'revision': {'head_sha': self.base, 'diff_sha256': 'a' * 64,
                              'source_sha256': runtime_session.tree_digest(runtime_session.source_tree(self.root))},
-                'initial_state': {'value': 7}, 'environment': {'os': 'test', 'viewport': [800, 600]},
+                'initial_state': {'value': 7}, 'environment': {'os': 'test'},
                 'inputs': ['Открыть локальный документ', 'Прочитать значение'], 'expected': 'value=7',
                 'procedure': 'Сверить первичный JSON', 'readiness_state': 'ready', 'material_conditions': {'role': 'operator'},
-                'nonmaterial_reasons': {}, 'preparation': ['Фиксация камеры не доказывает визуальную приёмку'],
+                'nonmaterial_reasons': {}, 'preparation': ['Открыть локальный документ'],
                 'restoration': ['Повторно проверить условия'], 'restart_required': restart}
 
     def observations(self, spec, sessions):
@@ -133,6 +133,18 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(len({item['sha256'] for item in attachments}), 1)
             self.assertEqual((external / 'foreign.log').read_text(encoding='utf-8'), 'foreign')
             runtime_protocol.session(session)
+
+    def test_legacy_environment_remains_readable(self):
+        directory = self.d / 'legacy'
+        spec = self.spec()
+        spec['environment']['viewport'] = [800, 600]
+        with self.assertRaisesRegex(ValueError, 'поля среды'):
+            runtime_protocol.declare(directory, spec)
+        directory.mkdir()
+        runtime_session.write(directory / 'declaration.json',
+                              {'version': 1, 'declaredAt': runtime_session.now(), 'spec': spec})
+        runtime_protocol.finish(directory, self.observations(spec, [self.helper()]))
+        self.assertTrue(runtime_protocol.compare(directory, directory)['comparable'])
 
     def test_two_scenarios_comparison_and_restart(self):
         for name in ('document', 'batch-helper'):

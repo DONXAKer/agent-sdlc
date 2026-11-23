@@ -9,6 +9,8 @@ for _stream in (sys.stdout, sys.stderr):
 import argparse
 import hashlib
 import json
+import posixpath
+import re
 import subprocess
 import zipfile
 from pathlib import Path
@@ -33,6 +35,9 @@ TEMPLATES = {
     'retro-a3': ('retro',),
 }
 RESOURCE_RECORD = CODEX / 'generated-resources.json'
+GUIDES = ('SDLC.md', 'process-quality.md', 'implementation-contract.md', 'runtime-verification.md', 'profiles/guided.md')
+# Опубликованные материалы, на которые ссылаются автономные комплекты.
+SOURCE_URL = 'https://github.com/DONXAKer/agent-sdlc/blob/6a39fc53124a9fea94c6f728cc71f1bbb16d0eb9/'
 
 
 def canonical_bytes(path):
@@ -69,9 +74,29 @@ def encoded(value):
     return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + '\n').encode('utf-8')
 
 
+def guide_bytes(root, name, destination, skills, claude=False):
+    """Разреши ссылки от фактического места справочника в комплекте."""
+    def link(match):
+        target = match[1]
+        if target.startswith('templates/'):
+            filename = target.split('/')[1]
+            stage = TEMPLATES[filename.split('.')[0]][0] if claude else 'verify'
+            target = posixpath.relpath(f'{skills}/sdlc-{stage}/templates/{filename}', posixpath.dirname(destination))
+        elif target in ('example/gates.md', 'profiles/preparation-v2.md', 'example/plan-checks-and-gates.md'):
+            target = SOURCE_URL + target
+        elif target == '../model-runs/guided-history.md':
+            target = SOURCE_URL + 'profiles/guided.md#приёмка-профиля'
+        return '](' + target + ')'
+    content = canonical_bytes(root / name).decode('utf-8')
+    return re.sub(r'\]\(([^()\s]+)\)', link, content).encode('utf-8')
+
+
 def generated(root):
     desired = {}
-    desired[CLAUDE / 'skills/sdlc-verify/references/runtime-verification.md'] = canonical_bytes(root / 'runtime-verification.md')
+    for variant, stage in ((CLAUDE, 'verify'), (CODEX, 'run')):
+        for name in GUIDES:
+            dest = f'skills/sdlc-{stage}/references/{name}'
+            desired[variant / dest] = guide_bytes(root, name, dest, 'skills', variant == CLAUDE)
     for name, skills in TEMPLATES.items():
         source = Path('templates') / (name + '.template.md')
         for skill in skills:
@@ -90,9 +115,6 @@ def generated(root):
     for name in TEMPLATES:
         path = Path('templates') / (name + '.template.md')
         desired[CODEX / 'skills/sdlc-verify/templates' / path.name] = canonical_bytes(root / path)
-    desired[CODEX / 'skills/sdlc-run/references/process-quality.md'] = canonical_bytes(root / 'process-quality.md')
-    desired[CODEX / 'skills/sdlc-run/references/SDLC.md'] = canonical_bytes(root / 'SDLC.md')
-    desired[CODEX / 'skills/sdlc-run/references/runtime-verification.md'] = canonical_bytes(root / 'runtime-verification.md')
     codex_skills = selected_files(root, [name for name in inventory(root)['codex'] if Path(name).is_relative_to(CODEX / 'skills')], desired)
     # Cursor использует те же ресурсы. Меняются только обращения к среде и вызовы навыков.
     for path, data in codex_skills.items():
@@ -214,8 +236,10 @@ def package(root=ROOT, revision=None):
             entries = {p.relative_to(base).as_posix(): data for p, data in payload.items()}
         else:
             entries = {p.as_posix(): data for p, data in payload.items()}
-            for name in ('install.sh', 'junk-names.sh', 'SDLC.md', 'process-quality.md'):
+            for name in ('install.sh', 'junk-names.sh'):
                 entries[name] = canonical_bytes(root / name)
+            for name in GUIDES:
+                entries[name] = guide_bytes(root, name, name, (CLAUDE / 'skills').as_posix(), claude=True)
         entries['build.json'] = encoded({'revision': revision, 'version': version,
                                         'sha256': {n: hashlib.sha256(b).hexdigest() for n, b in sorted(entries.items())}})
         archive = dest / f'agent-sdlc-{variant}.zip'

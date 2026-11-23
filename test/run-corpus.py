@@ -55,6 +55,8 @@ def run_case(case_dir: Path) -> str:
     tmp = tempfile.TemporaryDirectory()
     root = Path(tmp.name)
     if 'source' not in meta:
+        if 'base' in meta:
+            shutil.copytree(case_dir.parent / meta['base'] / '.sdlc', root / '.sdlc')
         shutil.copytree(case_dir, root, dirs_exist_ok=True)
     if "source" in meta:
         src = (case_dir / meta["source"]).resolve()

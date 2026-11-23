@@ -15,8 +15,7 @@ from pathlib import Path
 import runtime_session
 import snapshot_base
 
-ENVIRONMENT = {'os', 'application_version', 'role', 'exampleVersion', 'camera', 'viewport',
-               'inset', 'character_position', 'scene_generation'}
+ENVIRONMENT = {'os', 'application_version', 'role'}
 OUTCOMES = {'success', 'rule_rejection', 'setup_error', 'input_loss', 'dependency_failure'}
 
 

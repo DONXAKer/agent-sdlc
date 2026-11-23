@@ -56,6 +56,7 @@ jobs:
           body: 'Синхронизация канонических ресурсов и контрольных сумм. Тексты навыков не изменяются.'
           add-paths: |
             implementations/claude-code/skills/**/templates/**
+            implementations/claude-code/skills/sdlc-verify/references/**
             implementations/claude-code/skills/sdlc-verify/tools/**
             implementations/codex/skills/**/templates/**
             implementations/codex/skills/sdlc-verify/tools/**

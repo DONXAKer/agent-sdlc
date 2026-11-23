@@ -2,6 +2,7 @@
 import importlib.util
 import fnmatch
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -65,12 +66,27 @@ class DistributionTests(unittest.TestCase):
         for name in ('templates', 'implementations'):
             shutil.copytree(ROOT / name, self.root / name,
                             ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.zip'))
-        for name in ('sdlc-constants.json', 'SDLC.md', 'process-quality.md', 'runtime-verification.md', 'install.sh', 'junk-names.sh', 'distribution-files.json'):
+        for name in (*distribution.GUIDES, 'sdlc-constants.json', 'install.sh', 'junk-names.sh', 'distribution-files.json'):
+            (self.root / name).parent.mkdir(exist_ok=True, parents=True)
             shutil.copy2(ROOT / name, self.root / name)
         distribution.sync(self.root)
 
     def snapshot(self):
         return {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+
+    def test_guide_links_in_isolated_skill_trees(self):
+        for client in ('codex', 'cursor', 'claude-code', 'kimi-code', 'opencode', 'qwen-code'):
+            skills = self.root / 'installed' / client / 'skills'
+            shutil.copytree(self.root / 'implementations' / client / 'skills', skills)
+            stage = 'verify' if client == 'claude-code' else 'run'
+            for name in distribution.GUIDES:
+                source = skills / ('sdlc-' + stage) / 'references' / name
+                for target in re.findall(r'\]\(([^()\s]+)\)', source.read_text(encoding='utf-8')):
+                    if target.startswith(('https://', '#')):
+                        continue
+                    dest = (source.parent / target.split('#')[0]).resolve()
+                    with self.subTest(client=client, guide=name, target=target):
+                        self.assertTrue(dest.is_relative_to(skills) and dest.exists())
 
     def test_check_is_read_only_and_sync_is_idempotent(self):
         before = self.snapshot()

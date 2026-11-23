@@ -243,9 +243,9 @@ CONSUMERS = {
     "prediction_outcomes": lambda: all(value in read('process-quality.md') and value in read('profiles/guided.md')
                                        for value in C['prediction_outcomes'].values()),
     "stability_states": lambda: all(f'`{value}`' in sdlc for value in C['stability_states']),
-    "p_chart": lambda: str(C['p_chart']['minimum_n']) in sdlc and C['p_chart']['minimum_n'] >= 20,
+    "p_chart": lambda: str(C['p_chart']['minimum_n']) in read('process-quality.md') and C['p_chart']['minimum_n'] >= 20,
     "andon": lambda: C['andon']['action'] in sdlc and C['andon']['outcome'] in templates_text,
-    "kano_classes": lambda: all(value in sdlc and value in templates_text
+    "kano_classes": lambda: all(value in read('process-quality.md') and value in read('profiles/guided.md')
                                 for value in C['kano_classes']['values']),
     "human_decision_labels": lambda: True,
     "defect_actions": lambda: all(a in templates_text for a in C["defect_actions"]),
@@ -274,7 +274,7 @@ for label in C["human_decision_labels"]:
 
 # --- 9. Имена файлов реализации в первоисточнике и шаблонах существуют ---------------------------
 tree_files = {p.name for p in ROOT.rglob("*.py") if "__pycache__" not in str(p)}
-for rel in ["SDLC.md"] + [str(p.relative_to(ROOT)) for p in (ROOT / "templates").glob("*.md")]:
+for rel in ["SDLC.md", "implementation-contract.md"] + [str(p.relative_to(ROOT)) for p in (ROOT / "templates").glob("*.md")]:
     for name in set(re.findall(r"\b([\w-]+\.py)\b", read(rel))):
         if name not in tree_files:
             fail(rel, f"упомянут файл «{name}», которого нет в дереве реализации")

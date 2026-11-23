@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +37,10 @@ def main():
         if name == 'review':
             command.add_argument('answer', type=Path)
     args = parser.parse_args()
-    root = args.root.resolve()
+    # abspath, не resolve(): resolve() схлопывает subst-диски (P: -> D:\Проекты)
+    # в реальный путь с не-ASCII, а Gradle test worker читает classpath из @argfile
+    # в JNU-кодировке и не видит такие каталоги (CNFE всех тестовых классов).
+    root = Path(os.path.abspath(args.root))
     d = root / ARTIFACTS_DIR / args.slug
     if (not re.fullmatch(r'[\w.-]+', args.slug) or args.slug in ('.', '..')
             or d.resolve().parent != (root / ARTIFACTS_DIR).resolve()

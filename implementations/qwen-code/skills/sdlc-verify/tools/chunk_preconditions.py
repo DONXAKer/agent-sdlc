@@ -2,12 +2,14 @@
 
 import json
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import snapshot_base
 from sdlc_common import profile_gate_errors, task_profile
 from sdlc_common import ARTIFACTS_DIR, CHUNK_FILES, artifact_targets, defect_class_catalog, files_to_touch, patch_files, plan_approved, preparation_checks, read, size_explained
+from sdlc_common import git_run, planned_paths
 
 PREPARE_VERSION = 2
 
@@ -34,6 +36,69 @@ def artifact(d, name):
     if not target.is_file():
         raise ValueError(f'Артефакт предусловий отсутствует: {name}')
     return target
+
+
+def normalized_readiness(raw):
+    return raw.replace(b'\r\n', b'\n').rstrip(b'\n')
+
+
+def amendment_record(receipt, before, after, owner, reason):
+    return {'version': 1, 'artifact': 'readiness.md', 'prepare_sha256': snapshot_base.digest(receipt),
+            'before_sha256': snapshot_base.digest(before), 'after_sha256': snapshot_base.digest(after),
+            'owner': owner, 'reason': reason}
+
+
+def amendment_line(receipt, before, after, owner, reason):
+    record = amendment_record(receipt, before, after, owner, reason)
+    return 'Поправка готовности: ' + json.dumps(record, ensure_ascii=False, sort_keys=True)
+
+
+def valid_readiness_amendment(d, n, receipt, before, current):
+    if normalized_readiness(before) != normalized_readiness(current):
+        return False
+    journal = artifact(d, f'chunk-{n}-journal.md').read_text(encoding='utf-8')
+    for line in journal.splitlines():
+        if not line.startswith('Поправка готовности: '):
+            continue
+        try:
+            record = json.loads(line.removeprefix('Поправка готовности: '))
+            owner, reason = record['owner'], record['reason']
+            if (isinstance(owner, str) and owner.strip() and isinstance(reason, str) and reason.strip()
+                    and record == amendment_record(receipt, before, current, owner, reason)):
+                return True
+        except (KeyError, ValueError, TypeError):
+            continue
+    return False
+
+
+def amend_readiness(root, d, n, replacement, owner, reason):
+    if not owner.strip() or not reason.strip():
+        raise ValueError('Укажи владельца решения и причину поправки')
+    problems = errors(root, d, n)
+    if problems:
+        raise ValueError('\n'.join(problems))
+    receipt = receipt_path(d, n).read_bytes()
+    recorded = json.loads(receipt).get('documents', {}).get('readiness.md')
+    if not recorded:
+        raise ValueError('Исходная квитанция не закрепляет readiness.md')
+    before = artifact(d, recorded['path']).read_bytes()
+    current = artifact(d, 'readiness.md')
+    after = replacement.read_bytes()
+    if normalized_readiness(before) != normalized_readiness(after):
+        raise ValueError('Допустима поправка переводов строк и пустых строк в конце readiness.md')
+    if current.read_bytes() == after:
+        return
+    journal = artifact(d, f'chunk-{n}-journal.md')
+    line = amendment_line(receipt, before, after, owner.strip(), reason.strip())
+    with tempfile.TemporaryDirectory(dir=d, prefix='.readiness-') as tmp:
+        staged = Path(tmp)
+        (staged / 'readiness.md').write_bytes(after)
+        raw = journal.read_bytes()
+        addition = ('\n\n' + line + '\n').encode('utf-8')
+        if line.encode('utf-8') not in raw.splitlines():
+            (staged / 'journal.md').write_bytes(raw.rstrip(b'\r\n') + addition)
+            (staged / 'journal.md').replace(journal)
+        (staged / 'readiness.md').replace(current)
 
 
 def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
@@ -81,6 +146,22 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
         if (previous_base != base or snapshot_base.digest(current_diff.encode('utf-8', errors='surrogateescape')) != rec.get('diff_sha256')
                 or not patch.is_file() or snapshot_base.digest(patch.read_bytes()) != rec.get('diff_sha256')):
             raise ValueError('Дерево отличается от предыдущей попытки; поздняя подготовка не доказывает порядок')
+    original_paths = load_tree(root, d, 1) if int(n) > 1 and (d / '.chunk-1-tree.json').is_file() else None
+    for name, operation in planned_paths(plan):
+        if any(char in name for char in '*?['):
+            raise ValueError(f'Укажи точный путь плана: {name}')
+        path = snapshot_base.safe_path(root, name, follow=False)
+        exists_as_file = path.is_file() or path.is_symlink()
+        if not exists_as_file and path.is_dir() and base['kind'] == 'git':
+            rc, index, _ = git_run(['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', name], root)
+            exists_as_file = rc == 0 and any(
+                row.startswith('160000 ') and row.partition('\t')[2] == name for row in index.split('\0'))
+        present = name in original_paths if original_paths is not None else exists_as_file
+        if operation == '[new]':
+            if present or (original_paths is None and path.exists()):
+                raise ValueError(f'Новый путь плана уже занят: {name}')
+        elif not present and not exists_as_file:
+            raise ValueError(f'Путь плана не существует: {name}. Для создания укажи [new].')
     baseline = d / f'.chunk-{n}-baseline.json'
     if not baseline.exists():
         capture_baseline()
@@ -183,8 +264,11 @@ def errors(root, d, n, expected_hash=None, historical=False):
                     return ['Историческая редакция документа изменена']
                 if name == 'intent.md' and rec.get('task_profile') != task_profile(raw.decode('utf-8')):
                     return ['Профиль квитанции отличается от закреплённого intent']
-                if not historical and (d / name).read_bytes() != raw:
-                    return ['Intent или readiness изменились после квитанции; требуется новая подготовка']
+                if not historical:
+                    current = (d / name).read_bytes()
+                    if current != raw and (name != 'readiness.md' or not valid_readiness_amendment(
+                            d, n, target.read_bytes(), raw, current)):
+                        return ['Intent или readiness изменились после квитанции; требуется новая подготовка']
         if 'tree' in rec:
             load_tree(root, d, n)
         initial_journal = rec.get('journal')

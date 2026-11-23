@@ -2,7 +2,9 @@
 
 import json
 import unittest
+from unittest.mock import patch
 import test_snapshot_base as fixtures
+import gate_evidence
 from sdlc_common import gate_context
 
 
@@ -59,6 +61,35 @@ class GateContextTests(unittest.TestCase):
         for n, k in ((1, 1), ('../escape', 1), (1, '0')):
             with self.assertRaises(ValueError):
                 gate_context(self.root, self.d, 'git --version', n, k)
+
+    def test_named_tests_gate_distinguishes_reused_and_fresh_report(self):
+        reports = self.root / 'reports'
+        reports.mkdir()
+        report = reports / 'check.xml'
+        report.write_text('предыдущий отчёт', encoding='utf-8')
+        command = 'git --version'
+        (self.d.parent / 'test-results.json').write_text(json.dumps({
+            'version': 1, 'command': command, 'directory': 'reports',
+            'suffix': '.xml', 'minimum_results': 1}), encoding='utf-8')
+        identity = {'base': 'base', 'patch_sha256': 'patch'}
+        with patch.object(gate_evidence, 'identity', return_value=identity):
+            def run():
+                return gate_evidence.run(self.root, self.d, 1, 1, 'Тесты', command, {}, None,
+                                         lambda: ('base', 'patch'))
+
+            with patch.object(gate_evidence, 'run_shell', return_value=(0, 'OK')):
+                code, _, _ = run()
+            self.assertNotEqual(code, 0)
+
+        def fresh(*args, **kwargs):
+            report.write_text('новый отчёт', encoding='utf-8')
+            return 0, 'OK'
+
+        with patch.object(gate_evidence, 'identity', return_value={'base': 'base', 'patch_sha256': 'patch'}), \
+             patch.object(gate_evidence, 'run_shell', side_effect=fresh):
+            code, _, receipt = run()
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(receipt.read_bytes())['test_results']['fresh'], ['check.xml'])
 
 
 if __name__ == '__main__':

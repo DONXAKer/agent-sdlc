@@ -5,13 +5,16 @@ import os
 import re
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import snapshot_base
-from sdlc_common import ARTIFACTS_DIR, MANDATORY_GATES, command_of, enabled_gates, gate_context, read, run_shell
+from sdlc_common import ARTIFACTS_DIR, MANDATORY_GATES, command_of, enabled_gates, gate_context, read, require_execution_owner, run_shell
 
 PATCH_GATES = {'Scope: файлы вне плана', 'Анти-обход тест-гейта'}
 OTHER_RESULTS = (set(MANDATORY_GATES) - PATCH_GATES) | {'Сверка отчёта с набором'}
+# Часы файловой системы и процесса могут округлять время по-разному.
+REPORT_CLOCK_TOLERANCE_NS = 1_000_000_000
 
 
 def needs_receipt(name, command):
@@ -70,6 +73,28 @@ def portable_context(d, n, k, inputs):
     return {key: patch.name if value == str(patch) else value for key, value in inputs.items()}
 
 
+def test_results_policy(root, name, command):
+    """Прочитай объявление свежих результатов для конкретной команды тестов."""
+    path = root / ARTIFACTS_DIR / 'test-results.json'
+    if name != 'Тесты' or not path.exists():
+        return None
+    policy = json.loads(path.read_bytes())
+    if (not isinstance(policy, dict) or policy.get('version') != 1 or policy.get('command') != command
+            or not isinstance(policy.get('directory'), str) or not isinstance(policy.get('suffix'), str)
+            or not re.fullmatch(r'\.[A-Za-z0-9]+', policy['suffix'])
+            or type(policy.get('minimum_results')) is not int or policy['minimum_results'] < 1):
+        raise ValueError('Недопустимая политика свежести .sdlc/test-results.json')
+    snapshot_base.safe_path(root, policy['directory'])
+    return policy
+
+
+def result_files(root, policy):
+    directory = snapshot_base.safe_path(root, policy['directory'])
+    return {path.relative_to(directory).as_posix(): path.stat().st_mtime_ns
+            for path in directory.rglob('*' + policy['suffix'])
+            if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(directory.resolve())}
+
+
 def run(root, d, n, k, name, command, context, layer, current_revision):
     n, k = int(n), int(k)
     record = identity(d, n, k, name, command)
@@ -78,11 +103,28 @@ def run(root, d, n, k, name, command, context, layer, current_revision):
         raise ValueError(f'Гейт «{name}»: рабочее дерево отличается от патча текущей попытки')
     target = directory(d, n, k, name)
     target.mkdir(parents=True, exist_ok=True)
+    policy = test_results_policy(root, name, command)
+    before = result_files(root, policy) if policy else {}
+    started_at = time.time_ns()
+    started = time.monotonic_ns()
     code, output = run_shell(command, root, env={**os.environ, **context})
+    finished_at = time.time_ns()
+    duration_ms = (time.monotonic_ns() - started) // 1_000_000
     if identity(d, n, k, name, command) != record:
         raise ValueError(f'Гейт «{name}» изменил патч или evidence попытки')
     if current_revision() != revision:
         raise ValueError(f'Гейт «{name}» изменил рабочее дерево; квитанция не выпущена')
+    record['duration_ms'] = duration_ms
+    record['session_id'] = os.environ.get('SDLC_CHECK_SESSION') or uuid.uuid4().hex
+    record['pid'] = os.getpid()
+    if policy:
+        fresh = sorted(path for path, stamp in result_files(root, policy).items()
+                       if started_at - REPORT_CLOCK_TOLERANCE_NS <= stamp <= finished_at + REPORT_CLOCK_TOLERANCE_NS
+                       and before.get(path) != stamp)
+        record['test_results'] = {'policy': policy, 'fresh': fresh}
+        if len(fresh) < policy['minimum_results']:
+            code = code or 1
+            output += '\nНедостаточно свежих файлов результатов тестов.\n'
     raw = output.encode('utf-8', errors='surrogateescape')
     record.update(exit_code=code, output_sha256=snapshot_base.digest(raw), layer=layer,
                   context=portable_context(d, n, k, context))
@@ -91,6 +133,7 @@ def run(root, d, n, k, name, command, context, layer, current_revision):
         (staging / 'output.txt').write_bytes(raw)
         (staging / 'receipt.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         published = target / f'run-{time.time_ns():020d}-{staging.name.removeprefix(".run-")}'
+        require_execution_owner()
         staging.rename(published)
     return code, output, published / 'receipt.json'
 
@@ -117,6 +160,15 @@ def errors(root, d, n, k, name):
             raise ValueError(f'код выхода команды: {data.get("exit_code")!r}')
         if data.get('output_sha256') != snapshot_base.digest(raw):
             raise ValueError('SHA-256 вывода команды не совпадает')
+        policy = test_results_policy(root, name, command)
+        if policy:
+            results = data.get('test_results')
+            if not isinstance(results, dict) or results.get('policy') != policy:
+                raise ValueError('Нет свидетельства по действующей политике свежести тестов')
+            fresh = results.get('fresh')
+            if (not isinstance(fresh, list) or any(not isinstance(path, str) for path in fresh)
+                    or len(set(fresh)) < policy['minimum_results']):
+                raise ValueError('Недостаточно свежих файлов результатов тестов')
         last = raw.rstrip().rsplit(b'\n', 1)[-1]
         try:
             result = json.loads(last)

@@ -31,7 +31,7 @@ class ContextEvidenceTests(unittest.TestCase):
     def test_prepare_checks_approval_and_planned_size_before_receipt(self):
         self.snapshot()
         plan = self.plan.read_text(encoding='utf-8')
-        expanded = plan + ''.join(f'| file-{i}.py | правка |\n' for i in range(8))
+        expanded = plan + ''.join(f'| file-{i}.py | [new] создать |\n' for i in range(8))
         for invalid in (plan.replace('Оператор · 2026-11-09', 'ожидается решение'), expanded,
                         expanded + '\nПочему этот chunk больше ориентира: нет\n'):
             self.plan.write_text(invalid, encoding='utf-8')
@@ -121,6 +121,8 @@ class ContextEvidenceTests(unittest.TestCase):
         self.assertEqual(chunk_preconditions.errors(self.root, self.d, 1,
                          previous['preconditions']['receipt_sha256'], historical=True), [])
         self.assertEqual(chunk_preconditions.errors(self.root, self.d, 2), [])
+        verified = self.tool('attempt-evidence.py', 'verify', self.root, 'T-1', 1, 1)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
         archived = self.d / '.chunk-1-plan.md'
         archived.write_bytes(archived.read_bytes() + b' ')
         self.assertTrue(chunk_preconditions.errors(self.root, self.d, 1, historical=True))

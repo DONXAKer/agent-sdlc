@@ -87,9 +87,9 @@ class RunnerLiteTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         source = self.root / 'app.py'
         source.write_bytes(b'answer = 2\n')
-        def check():
+        def check(*flags):
             return self.tool('runner-lite.py', 'check', self.root, 'T-1', 1, 1, '--executor-model', 'test',
-                             '--layer', 'integration')
+                             '--layer', 'integration', *flags)
         for _ in range(2):
             result = check()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -99,6 +99,14 @@ class RunnerLiteTests(unittest.TestCase):
         result = check()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(evidence.read_bytes())['layer'], 'integration')
+        gate_directory = next(self.d.glob('.chunk-1-gate-runs/attempt-1/*'))
+        receipt = sorted(gate_directory.glob('run-*/receipt.json'))[-1]
+        receipt.unlink()
+        result = check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('--resume-gates', result.stderr)
+        result = check('--resume-gates')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         source.write_bytes(b'answer = 3\n')
         self.assertNotEqual(check().returncode, 0)
 

@@ -878,7 +878,9 @@ def check_flow(root: Path, slug: str, at: str = "handoff") -> int:
                 continue
             v.check(gate_row_in(last_report, g), f"строка гейта «{g}» в отчёте", "строки нет",
                     "включённый гейт без строки — сверка отчёта с набором должна быть механической")
-            if require_receipts and gate_evidence.needs_receipt(g, command) and gate_passed(last_report, g):
+            needs_freshness = g == 'Тесты' and (d.parent / 'test-results.json').exists()
+            needs_receipt = needs_freshness or (require_receipts and gate_evidence.needs_receipt(g, command))
+            if needs_receipt and gate_passed(last_report, g):
                 problems = gate_evidence.errors(root, d, n, k, g)
                 v.check(not problems, f'квитанция гейта «{g}», chunk {n}, попытка {k}', '; '.join(problems),
                         'прогони гейт по патчу текущей попытки и сохрани результат через run-gate --gate')

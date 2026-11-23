@@ -15,7 +15,10 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
+import threading
+from contextlib import contextmanager
 import sys
 from pathlib import Path
 
@@ -406,8 +409,8 @@ def require_tests_cmd(gates_text: str) -> str:
     return cmd
 
 
-def files_to_touch(plan_text: str):
-    """Пути из таблицы files_to_touch плана (первая колонка), без .sdlc/**."""
+def planned_paths(plan_text: str):
+    """Верни пути и явно объявленные операции из таблицы files_to_touch."""
     sec = next((s for s in re.split(r"^## ", plan_text or "", flags=re.M) if s.startswith("files_to_touch")), "")
     paths = []
     for ln in sec.splitlines():
@@ -418,8 +421,12 @@ def files_to_touch(plan_text: str):
             continue
         if PLACEHOLDER in cells[0]:
             continue
-        paths.append(cells[0])
+        paths.append((cells[0], cells[1].split(maxsplit=1)[0] if len(cells) > 1 and cells[1] else ''))
     return paths
+
+
+def files_to_touch(plan_text: str):
+    return [path for path, _ in planned_paths(plan_text)]
 
 
 def artifact_targets(root, d):
@@ -452,7 +459,8 @@ def artifact_observed(name, targets, d=None):
         return False
     parts = PurePosixPath(name).parts[1:]
     if any(part.startswith(('.chunk-', '.runner', '.snapshot-'))
-           or part in ('base-snapshot', '.active', '.scope.json', '.review-lock', '.claims-lock', '.events.ndjson')
+           or part in ('base-snapshot', '.active', '.scope.json', '.review-lock', '.claims-lock', '.gate-run.lock',
+                       '.events.ndjson')
            for part in parts):
         return False
     return not re.fullmatch(
@@ -510,7 +518,8 @@ GIT_BASE = ["git", "-c", "core.quotepath=false"]
 def git_run(args, cwd, input=None):
     """(rc, stdout, stderr) — байты декодируются вручную, переводы строк не трогаются."""
     try:
-        proc = subprocess.run(GIT_BASE + list(args), cwd=cwd, capture_output=True, input=input)
+        proc = subprocess.run(GIT_BASE + list(args), cwd=cwd, capture_output=True, input=input,
+                              stdin=subprocess.DEVNULL if input is None else None)
     except FileNotFoundError:
         return 127, "", "git: not found"
     return proc.returncode, proc.stdout.decode("utf-8", errors="surrogateescape"), \
@@ -650,15 +659,74 @@ def git_bash():
     return None if not b or "system32" in b.lower() else b
 
 
+@contextmanager
+def execution_lock(path):
+    """Удерживай системную блокировку до окончания операции."""
+    with path.open('a+b') as lock:
+        lock.seek(0)
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise ValueError(f'Уже выполняется операция: {path.name}') from error
+        yield
+
+
+_execution_cancelled = None
+
+
+def watch_execution_owner(pipe):
+    """Свяжи запуск команды с временем жизни родителя через закрытие канала."""
+    global _execution_cancelled
+    _execution_cancelled = threading.Event()
+
+    def watch():
+        os.read(pipe.fileno(), 1)
+        _execution_cancelled.set()
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def require_execution_owner():
+    if _execution_cancelled is not None and _execution_cancelled.is_set():
+        raise ValueError('Родительская сессия закрылась; результат не опубликован')
+
+
 def run_shell(cmd: str, cwd, env=None):
     """(rc, вывод). На Windows — через Git Bash, если он есть: команды наборов пишутся в POSIX-стиле
     (`./gradlew`, `make -C`), и cmd.exe их не исполняет."""
     bash = git_bash()
-    if bash:
-        proc = subprocess.run([bash, "-c", cmd], cwd=cwd, capture_output=True, env=env)
-    else:
-        proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, env=env)
-    return proc.returncode, decode_console(proc.stdout + proc.stderr)
+    command = [bash, "-c", cmd] if bash else cmd
+    if _execution_cancelled is None:
+        proc = subprocess.run(command, cwd=cwd, shell=bash is None, capture_output=True, env=env)
+        return proc.returncode, decode_console(proc.stdout + proc.stderr)
+    require_execution_owner()
+    with subprocess.Popen(command, cwd=cwd, shell=bash is None, stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                          start_new_session=os.name != 'nt') as proc:
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=0.2)
+                require_execution_owner()
+                return proc.returncode, decode_console(stdout + stderr)
+            except subprocess.TimeoutExpired:
+                if not _execution_cancelled.is_set():
+                    continue
+                if os.name == 'nt':
+                    stopped = subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                                             capture_output=True)
+                    if stopped.returncode and proc.poll() is None:
+                        proc.kill()
+                else:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                require_execution_owner()
 
 
 def missing_tool(output: str, cmd: str, rc: int = 0):

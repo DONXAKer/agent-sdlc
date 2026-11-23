@@ -346,7 +346,7 @@ class OpenIssueTests(fixtures.ContextEvidenceTests):
             with self.subTest(kind=kind):
                 self.setUp()
                 self.plan.write_text(self.plan.read_text(encoding='utf-8').replace('snapshot', kind).replace(
-                    '| app.py | правка |', '| app.py | правка |\n| second.py | правка |'), encoding='utf-8')
+                    '| app.py | правка |', '| app.py | правка |\n| second.py | [new] создать |'), encoding='utf-8')
                 for n in range(26):
                     (self.root / f'foreign-{n}.txt').write_text('Чужая строка\n' * 20, encoding='utf-8')
                 if kind == 'snapshot':
@@ -662,6 +662,9 @@ class OpenIssueTests(fixtures.ContextEvidenceTests):
         self.plan.write_text(self.plan.read_text(encoding='utf-8').replace('snapshot', 'git'), encoding='utf-8')
         (self.root / 'vendor/module').mkdir(parents=True)
         self.git('update-index', '--add', '--cacheinfo', '160000,' + self.base + ',vendor/module')
+        self.git('commit', '-qm', 'Зафиксирован gitlink')
+        self.plan.write_text(self.plan.read_text(encoding='utf-8').replace(
+            self.base, self.git('rev-parse', 'HEAD').stdout.strip()) + '| vendor/module | правка |\n', encoding='utf-8')
         result = self.prepare()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         (self.root / 'app.py').write_bytes(b'answer = 2\r\n')

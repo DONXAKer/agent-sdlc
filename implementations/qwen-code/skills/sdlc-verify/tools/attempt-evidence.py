@@ -71,7 +71,6 @@ import json
 import os
 import re
 import sys
-from contextlib import contextmanager
 from tempfile import NamedTemporaryFile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -84,11 +83,12 @@ from sdlc_common import (  # noqa: E402
 import snapshot_base
 import chunk_preconditions
 import gate_evidence
+from sdlc_common import execution_lock, require_execution_owner, watch_execution_owner
 import profile_guard
 
 TOOL = "attempt-evidence.py"
 VERSION = 2
-CAPABILITIES = ("baseline", "compare", "git", "preflight", "prepare", "run-gate", "snapshot", "verify", "write")
+CAPABILITIES = ("amend-readiness", "baseline", "compare", "git", "preflight", "prepare", "run-gate", "snapshot", "verify", "write")
 
 
 def write_bytes_text(path: Path, text: str):
@@ -102,23 +102,12 @@ def write_bytes_text(path: Path, text: str):
         staging.unlink(missing_ok=True)
 
 
-@contextmanager
 def attempt_lock(directory, n, k):
     """Блокировка ядра освобождается также при аварийном завершении процесса."""
     if not all(re.fullmatch(r'[1-9][0-9]*', str(value)) for value in (n, k)):
         raise ValueError('Недопустимый номер попытки')
-    with (directory / f'.chunk-{n}-attempt-{k}.lock').open('a+b') as lock:
-        lock.seek(0)
-        try:
-            if os.name == 'nt':
-                import msvcrt
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            raise ValueError('Запись этой попытки уже выполняется') from error
-        yield
+    lock = snapshot_base.safe_path(directory, f'.chunk-{n}-attempt-{k}.lock')
+    return execution_lock(lock)
 
 
 def read_bytes_text(path: Path) -> str:
@@ -221,6 +210,7 @@ def write_mode(root: Path, slug: str, n: str, k: str, tests_cmd, executor_model,
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     write_bytes_text(patch, diff)
     rc, output = run_shell(tests_cmd, root, env={**os.environ, **context})
+    require_execution_owner()
     missing = missing_tool(output, tests_cmd, rc)
     write_bytes_text(patch, diff)
     write_bytes_text(tests_out, output)
@@ -325,6 +315,14 @@ def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
     patch_text = read_bytes_text(patch)
     patch_hash = sha256(patch_text)
     rec = json.loads(evidence.read_text(encoding="utf-8")) if evidence.exists() else None
+    prepare_hash = (rec or {}).get('preconditions', {}).get('receipt_sha256')
+    problems = []
+    if prepare_hash:
+        later_chunks = [int(match.group(1)) for path in d.glob('.chunk-*-preconditions.json')
+                        if (match := re.fullmatch(r'\.chunk-(\d+)-preconditions\.json', path.name))]
+        latest = max(later_chunks, default=int(n))
+        historical = latest > int(n) and not chunk_preconditions.errors(root, d, latest)
+        problems = chunk_preconditions.errors(root, d, n, expected_hash=prepare_hash, historical=historical)
     result = {
         "base_matches_evidence": rec is not None and rec.get('base', {'kind': 'git', 'id': rec.get('base_sha')}) == base,
         "base": base,
@@ -339,9 +337,11 @@ def verify_mode(root: Path, slug: str, n: str, k: str) -> int:
         "diffstat": diffstat(current),
         "produced_by": (rec or {}).get("tool", "не программой — файлы написал агент, свидетельством не считаются"),
     }
+    if problems:
+        result['precondition_errors'] = problems
     print(json.dumps(result, ensure_ascii=False, indent=2))
     intact = ('diff_matches_tree', 'base_matches_evidence', 'patch_matches_evidence', 'tests_matches_evidence')
-    return 0 if all(result[key] for key in intact) else 1
+    return 0 if not problems and all(result[key] for key in intact) else 1
 
 
 def main() -> int:
@@ -354,7 +354,7 @@ def main() -> int:
         argv = ["verify"] + argv[1:]
     elif argv and argv[0] == "--compare":
         argv = ["compare"] + argv[1:]
-    elif argv and argv[0] not in ("write", "baseline", "snapshot", "prepare", "compare", "verify", "run-gate", "preflight", "-h", "--help"):
+    elif argv and argv[0] not in ("write", "baseline", "snapshot", "prepare", "compare", "verify", "run-gate", "preflight", "amend-readiness", "-h", "--help"):
         argv = ["write"] + argv
     ap = argparse.ArgumentParser(prog=TOOL, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="mode", required=True)
@@ -377,6 +377,9 @@ def main() -> int:
     s.add_argument('root'); s.add_argument('slug')
     p = sub.add_parser('prepare')
     p.add_argument('root'); p.add_argument('slug'); p.add_argument('n'); p.add_argument('--locator', required=True)
+    a = sub.add_parser('amend-readiness', help='Запиши одобренную техническую поправку readiness')
+    a.add_argument('root'); a.add_argument('slug'); a.add_argument('n', type=int)
+    a.add_argument('replacement', type=Path); a.add_argument('--owner', required=True); a.add_argument('--reason', required=True)
     c = sub.add_parser("compare")
     c.add_argument("root"); c.add_argument("slug"); c.add_argument("n"); c.add_argument("k1"); c.add_argument("k2")
     v = sub.add_parser("verify")
@@ -386,8 +389,17 @@ def main() -> int:
     except SystemExit:
         return 2
     root = Path(os.path.abspath(a.root))
+    if a.mode in ('write', 'run-gate') and os.environ.pop('SDLC_CHECK_LEASE', '') == 'stdin':
+        watch_execution_owner(sys.stdin.buffer)
     if not re.fullmatch(r'[\w.-]+', a.slug) or a.slug in ('.', '..'):
         raise ValueError('Недопустимый slug')
+    if a.mode == 'amend-readiness':
+        if a.n < 1:
+            raise ValueError('Недопустимый номер chunk')
+        d = snapshot_base.safe_path(root, f'.sdlc/{a.slug}')
+        with execution_lock(snapshot_base.safe_path(root, '.sdlc/.gate-run.lock')):
+            chunk_preconditions.amend_readiness(root, d, a.n, a.replacement, a.owner, a.reason)
+        return 0
     if a.mode in ('preflight', 'run-gate'):
         d = root / ARTIFACTS_DIR / a.slug
         pending = a.mode == 'preflight' and a.phase == 'chunk'
@@ -402,11 +414,13 @@ def main() -> int:
         if a.gate:
             if a.phase != 'verify':
                 raise ValueError('Именованный запуск с квитанцией выполняется на Verify')
-            rc, output, receipt = gate_evidence.run(root, d, a.n, a.k, a.gate, command, context, a.layer,
-                                                   lambda: current_revision(root, d))
+            with attempt_lock(d, a.n, a.k), execution_lock(snapshot_base.safe_path(root, '.sdlc/.gate-run.lock')):
+                rc, output, receipt = gate_evidence.run(root, d, a.n, a.k, a.gate, command, context, a.layer,
+                                                       lambda: current_revision(root, d))
             print(f'Квитанция гейта: {receipt.relative_to(d)}', file=sys.stderr)
         else:
-            rc, output = run_shell(command, root, env={**os.environ, **context})
+            with execution_lock(snapshot_base.safe_path(root, '.sdlc/.gate-run.lock')):
+                rc, output = run_shell(command, root, env={**os.environ, **context})
         print(output, end='')
         return rc
     if a.mode == 'prepare':
@@ -431,7 +445,8 @@ def main() -> int:
     if a.mode == "write":
         if a.force and a.resume:
             raise ValueError('Выбери один режим записи')
-        with attempt_lock(root / ARTIFACTS_DIR / a.slug, a.n, a.k):
+        with attempt_lock(root / ARTIFACTS_DIR / a.slug, a.n, a.k), execution_lock(
+                snapshot_base.safe_path(root, '.sdlc/.gate-run.lock')):
             return write_mode(root, a.slug, a.n, a.k, a.tests_cmd, a.executor_model, a.force, a.layer, a.resume)
     if a.mode == "baseline":
         return baseline_mode(root, a.slug, a.n)

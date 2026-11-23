@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / 'implementations/claude-code/skills/sdlc-verify/tools'
 sys.path.insert(0, str(TOOLS))
 import snapshot_base
+from sdlc_common import execution_lock
 sys.path.insert(0, str(ROOT))
 from test.evidence_fixtures import parser_receipt
 
@@ -68,6 +70,99 @@ class SnapshotTests(unittest.TestCase):
         self.assertIsInstance(contract['version'], int)
         self.assertLessEqual({'snapshot', 'prepare'}, set(contract['capabilities']))
         self.assertFalse(list(self.d.glob('chunk-*')))
+
+    def test_prepare_rejects_missing_edit_and_accepts_declared_creation(self):
+        with self.plan.open('a', encoding='utf-8') as plan:
+            plan.write('| new.py | правка |\n')
+        (self.d / 'locator.md').write_text('Проверена область правки.', encoding='utf-8')
+        (self.d / 'chunk-1-journal.md').write_text('Подготовка.', encoding='utf-8')
+        self.snapshot()
+
+        def prepare():
+            return self.tool('attempt-evidence.py', 'prepare', self.root, 'T-1', 1, '--locator', 'locator.md')
+
+        failure = prepare()
+        self.assertNotEqual(failure.returncode, 0)
+        self.assertIn('Путь плана не существует: new.py', failure.stderr + failure.stdout)
+        self.assertFalse((self.d / '.chunk-1-preconditions.json').exists())
+        plan = self.plan.read_text(encoding='utf-8')
+        self.plan.write_text(plan.replace('| new.py | правка |', '| new.py | [new] создать |'), encoding='utf-8')
+        result = prepare()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_readiness_amendment_preserves_receipt_and_rejects_silent_changes(self):
+        (self.d / 'locator.md').write_text('Проверена область.', encoding='utf-8')
+        journal = self.d / 'chunk-1-journal.md'
+        journal.write_text('Подготовка.', encoding='utf-8')
+        self.snapshot()
+        result = self.tool('attempt-evidence.py', 'prepare', self.root, 'T-1', 1, '--locator', 'locator.md')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (self.root / 'app.py').write_bytes(b'answer = 2\n')
+        self.write()
+        receipt = self.d / '.chunk-1-preconditions.json'
+        original_receipt = receipt.read_bytes()
+        readiness = self.d / 'readiness.md'
+        initial = readiness.read_bytes()
+        replacement = self.d / 'replacement.md'
+        equivalent = initial.replace(b'\r\n', b'\n').rstrip(b'\n') + b'\n\n'
+        args = (self.root, 'T-1', 1, replacement, '--owner', 'Оператор', '--reason', 'Формат строк')
+        verify = (self.root, 'T-1', 1, 1)
+        replacement.write_bytes(equivalent.replace('готова'.encode(), 'не готова'.encode()))
+        result = self.tool('attempt-evidence.py', 'amend-readiness', *args)
+        self.assertNotEqual(result.returncode, 0)
+        readiness.write_bytes(equivalent)
+        self.assertNotEqual(self.tool('attempt-evidence.py', 'verify', *verify).returncode, 0)
+        readiness.write_bytes(initial)
+        replacement.write_bytes(equivalent)
+        result = self.tool('attempt-evidence.py', 'amend-readiness', *args)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.tool('attempt-evidence.py', 'verify', *verify)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(receipt.read_bytes(), original_receipt)
+        self.assertIn(snapshot_base.digest(initial), journal.read_text(encoding='utf-8'))
+        self.assertIn(snapshot_base.digest(equivalent), journal.read_text(encoding='utf-8'))
+
+    def test_live_project_gate_lock_blocks_another_writer(self):
+        self.snapshot()
+        with execution_lock(self.d.parent / '.gate-run.lock'):
+            result = self.tool('attempt-evidence.py', 'write', self.root, 'T-1', 1, 1)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Уже выполняется операция', result.stdout)
+        self.assertFalse(list(self.d.glob('chunk-1-attempt-1-evidence.json')))
+
+    def test_closed_owner_pipe_stops_test_command_before_evidence(self):
+        self.snapshot()
+        (self.d / 'locator.md').write_text('Проверена область.', encoding='utf-8')
+        (self.d / 'chunk-1-journal.md').write_text('Подготовка.', encoding='utf-8')
+        marker = self.d / 'running'
+        program = self.d / 'sleep.py'
+        program.write_text("from pathlib import Path\nimport time\n"
+                           "root = Path(__file__).parent\n"
+                           "(root / 'running').touch()\n"
+                           "time.sleep(30)\n"
+                           "(root / 'finished').touch()\n", encoding='utf-8')
+        tests_command = f'"{Path(sys.executable).as_posix()}" .sdlc/T-1/sleep.py'
+        (self.d.parent / 'gates.md').write_text(f'| Тесты | да | этап 6 | `{tests_command}` |', encoding='utf-8')
+        result = self.tool('attempt-evidence.py', 'prepare', self.root, 'T-1', 1, '--locator', 'locator.md')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        command = [sys.executable, str(TOOLS / 'runner-lite.py'), 'check',
+                   str(self.root), 'T-1', '1', '1', '--executor-model', 'тест', '--owner-stdin']
+        with subprocess.Popen(command, cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT) as process:
+            try:
+                deadline = time.monotonic() + 15
+                while not marker.is_file() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                output, _ = process.communicate(timeout=12)
+                self.assertTrue(marker.is_file(), output.decode('utf-8'))
+                self.assertNotEqual(process.returncode, 0)
+                self.assertIn('Родительская сессия закрылась', output.decode('utf-8'))
+            finally:
+                if process.poll() is None:
+                    process.stdin.close()
+                    process.wait(timeout=12)
+        self.assertFalse((self.d / 'finished').exists())
+        self.assertFalse(list(self.d.glob('chunk-1-attempt-1-evidence.json')))
 
     def test_dirty_layers_scope_untracked_and_crlf_roundtrip(self):
         (self.root / 'app.py').write_bytes(b'answer = 10\r\n')

@@ -78,6 +78,7 @@ class DistributionTests(unittest.TestCase):
         for client in ('codex', 'cursor', 'claude-code', 'kimi-code', 'opencode', 'qwen-code'):
             skills = self.root / 'installed' / client / 'skills'
             shutil.copytree(self.root / 'implementations' / client / 'skills', skills)
+            skills = skills.resolve()
             stage = 'verify' if client == 'claude-code' else 'run'
             for name in distribution.GUIDES:
                 source = skills / ('sdlc-' + stage) / 'references' / name

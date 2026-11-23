@@ -1,6 +1,7 @@
 """Выполни механические операции витка через установленные инструменты."""
 
 import argparse
+import os
 import json
 import re
 import subprocess
@@ -36,7 +37,7 @@ def main():
         if name == 'review':
             command.add_argument('answer', type=Path)
     args = parser.parse_args()
-    root = args.root.resolve()
+    root = Path(os.path.abspath(args.root))
     d = root / ARTIFACTS_DIR / args.slug
     if (not re.fullmatch(r'[\w.-]+', args.slug) or args.slug in ('.', '..')
             or d.resolve().parent != (root / ARTIFACTS_DIR).resolve()

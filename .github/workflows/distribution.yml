@@ -18,12 +18,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python tools/distribution.py sync
+      - name: Проверить актуальность ресурсов в checkout
+        run: python tools/distribution.py check
       - run: python implementations/codex/test_package.py
       - run: python implementations/kimi-code/test_package.py
       - run: python implementations/qwen-code/test_package.py
-      - name: Проверить актуальность ресурсов
-        run: python tools/distribution.py check
       - run: python check.py
       - run: python tools/distribution.py package
       - uses: actions/upload-artifact@v4

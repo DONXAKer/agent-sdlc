@@ -523,7 +523,8 @@ class OpenIssueTests(fixtures.ContextEvidenceTests):
 - **Где реализовано:** app.py:answer
 - **Чем закреплено:** test_answer.py:test_branch, FAIL до исправления, PASS после
 '''
-        self.assertEqual(flow.defect_record_errors(self.d, block), [])
+        for spelling in (source, f'`{source}`', f'`{source}`.'):
+            self.assertEqual(flow.defect_record_errors(self.d, block.replace(source, spelling)), [])
         for field in ('Класс', 'Действие', 'Кто утвердил', 'Чем закреплено'):
             bad = '\n'.join(line for line in block.splitlines() if not line.startswith('- **' + field + ':'))
             self.assertTrue(flow.defect_record_errors(self.d, bad))
@@ -764,11 +765,11 @@ class MethodologyPracticeTests(unittest.TestCase):
         self.assertIn('класс дефекта → системная корневая причина → контрмера', template)
         self.assertIn('Несвязанная задача', template)
         self.assertIn('открыт / перенесён', template)
-        self.assertIn('legacy-no-change', template)
-        self.assertIn('legacy-verify-text', template)
+        self.assertNotIn('legacy-no-change', template)
+        self.assertNotIn('legacy-verify-text', template)
         self.assertIn('**Первый персистентный отчёт серии:**', template)
         self.assertIn('## Отклонённые находки', template)
-        self.assertIn('Добавь остальные открытые уроки корпуса', template)
+        self.assertIn('Добавь подтверждённые открытые уроки из проверенных отчётов', template)
         self.assertIn('не открывай его заново без нового дефекта', template)
         self.assertIn('не закрывает автоматически прежние задачи', template)
         for name in ('codex', 'claude-code'):
@@ -776,7 +777,7 @@ class MethodologyPracticeTests(unittest.TestCase):
             self.assertIn('retro-a3.template.md', skill)
             self.assertIn('несвязанной задаче', skill)
             self.assertIn('системная корневая', skill)
-            self.assertIn('остальные открытые уроки корпуса', skill)
+            self.assertIn('подтверждённые открытые уроки из проверенных отчётов', skill)
             self.assertIn('не открывай', skill.casefold())
 
     def test_readme_links_only_documented_practices(self):

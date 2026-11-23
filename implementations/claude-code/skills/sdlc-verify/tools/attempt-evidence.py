@@ -385,7 +385,7 @@ def main() -> int:
         a = ap.parse_args(argv)
     except SystemExit:
         return 2
-    root = Path(a.root).resolve()
+    root = Path(os.path.abspath(a.root))
     if not re.fullmatch(r'[\w.-]+', a.slug) or a.slug in ('.', '..'):
         raise ValueError('Недопустимый slug')
     if a.mode in ('preflight', 'run-gate'):

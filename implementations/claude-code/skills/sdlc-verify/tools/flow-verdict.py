@@ -598,7 +598,13 @@ def defect_record_errors(d, handoff):
                 errors.append(f'Запись «{values["Имя"]}»: не заполнено поле «{name}»')
         if values['Действие'] not in ('конструкция', 'проверка', 'принятие риска'):
             errors.append('Запись о дефекте требует одно допустимое действие')
-        covered.update(re.findall(r'^- \*\*Источник дефекта:\*\*\s*(\S+)', block, re.M))
+        sources = re.findall(r'^- \*\*Источник дефекта:\*\*\s*(\S+)', block, re.M)
+        for source in sources:
+            if source.endswith('.'):
+                source = source[:-1]
+            if source.startswith('`') and source.endswith('`'):
+                source = source[1:-1]
+            covered.add(source)
     missing = required - covered
     if missing:
         errors.append('Нет обязательных записей о дефектах: ' + ', '.join(sorted(missing)))

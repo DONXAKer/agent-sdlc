@@ -72,6 +72,15 @@ class PreflightTests(unittest.TestCase):
         self.assertNotIn("Секреты в diff", [r["gate"] for r in rows])
         self.assertNotIn("Проверка предусловий публикации", [r["gate"] for r in rows])
 
+    def test_preflight_explains_how_to_register_builtin_review(self):
+        self.write_gates('git status')
+        cmd = [sys.executable, '-X', 'utf8', str(PREFLIGHT), str(self.root)]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('--builtin-review', result.stderr)
+        result = subprocess.run([*cmd, '--builtin-review'], capture_output=True, text=True, encoding='utf-8')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_missing_tool_is_blocked_env_candidate(self):
         self.write_gates("definitely-missing-tool-xyz test")
         rows = self.mod.preflight(self.root, "этап 6")

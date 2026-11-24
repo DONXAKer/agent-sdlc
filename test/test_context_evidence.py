@@ -41,6 +41,18 @@ class ContextEvidenceTests(unittest.TestCase):
         result = self.prepare()
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_prepare_reports_conflicting_operations_for_missing_path(self):
+        self.snapshot()
+        plan = self.plan.read_text(encoding='utf-8') + '| future.py | [new] создать |\n'
+        self.plan.write_text(plan + '| future.py | [edit] изменить |\n', encoding='utf-8')
+        result = self.prepare()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Конфликт строк плана', result.stdout)
+        self.assertFalse(chunk_preconditions.receipt_path(self.d, 1).exists())
+        self.plan.write_text(plan, encoding='utf-8')
+        result = self.prepare()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_early_receipt_accepts_git_and_dirty_snapshot(self):
         for kind in ('git', 'snapshot'):
             with self.subTest(kind=kind):

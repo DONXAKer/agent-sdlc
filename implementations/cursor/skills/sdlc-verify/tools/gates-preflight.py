@@ -127,6 +127,8 @@ def main() -> int:
         print(f"- {glyph} {r['gate']}: `{r['command']}`" if r["command"] else f"- {glyph} {r['gate']}: {r['detail']}")
         if r["status"] == "missing":
             print(f"    {r['detail']}")
+    if any(r['gate'] == 'Ревью независимым агентом' and r['status'] == 'no-command' for r in invalid):
+        print('Если доступен независимый агент ревью, повтори запуск с флагом --builtin-review.', file=sys.stderr)
     if missing:
         print("\nСреды для гейта физически нет — это `blocked_env` ДО попытки, не после (SDLC.md → этап 6).")
         print("Строка долга набора (заводится один раз на проект, не на каждый виток):")

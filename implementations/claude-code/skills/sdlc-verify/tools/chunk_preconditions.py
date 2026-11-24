@@ -161,7 +161,9 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
                 or not patch.is_file() or snapshot_base.digest(patch.read_bytes()) != rec.get('diff_sha256')):
             raise ValueError('Дерево отличается от предыдущей попытки; поздняя подготовка не доказывает порядок')
     original_paths = load_tree(root, d, 1) if int(n) > 1 and (d / '.chunk-1-tree.json').is_file() else None
-    for name, operation in planned_paths(plan):
+    path_operations = list(planned_paths(plan))
+    new_paths = {name for name, operation in path_operations if operation == '[new]'}
+    for name, operation in path_operations:
         if any(char in name for char in '*?['):
             raise ValueError(f'Укажи точный путь плана: {name}')
         path = snapshot_base.safe_path(root, name, follow=False)
@@ -175,6 +177,9 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
             if present or (original_paths is None and path.exists()):
                 raise ValueError(f'Новый путь плана уже занят: {name}')
         elif not present and not exists_as_file:
+            if name in new_paths:
+                raise ValueError(f'Конфликт строк плана для {name}: путь отсутствует, указаны [new] и {operation}. '
+                                 'Укажи [new] для создания, а последовательность правок опиши в chunk.')
             raise ValueError(f'Путь плана не существует: {name}. Для создания укажи [new].')
     baseline = d / f'.chunk-{n}-baseline.json'
     if not baseline.exists():

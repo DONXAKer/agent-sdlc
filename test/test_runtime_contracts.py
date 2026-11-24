@@ -381,15 +381,24 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(install.returncode, 0, install.stdout + install.stderr)
         expected = source / 'manifest.json'
         tools = self.root / '.agents/skills/sdlc-verify/tools'
+        legacy = self.root / '.codex/skills'
+        (legacy / 'sdlc-runner-sync').mkdir(parents=True)
         self.assertIn('manifest_sha256', profile_guard.check(self.root, expected, tools))
         with patch.dict(os.environ, {'SDLC_PROFILE_MANIFEST': str(expected)}):
             self.assertIsNotNone(profile_guard.before_prepare(tools))
             nested = self.root / 'project'
+            (nested / '.codex/skills/sdlc-runner-sync').mkdir(parents=True)
+            self.assertIsNotNone(profile_guard.before_prepare(tools, nested))
             overlay = nested / '.codex/agents'
             overlay.mkdir(parents=True)
             (overlay / 'sdlc-reviewer.toml').write_bytes(b'old')
             with self.assertRaisesRegex(ValueError, 'Конфликт'):
                 profile_guard.before_prepare(tools, nested)
+        duplicate = legacy / 'sdlc-verify'
+        duplicate.mkdir()
+        with self.assertRaisesRegex(ValueError, 'второй корень SDLC'):
+            profile_guard.check(self.root, expected, tools)
+        duplicate.rmdir()
         target = tools / 'chunk_preconditions.py'
         original = target.read_bytes()
         target.write_bytes(b'old-version')

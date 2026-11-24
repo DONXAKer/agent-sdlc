@@ -45,7 +45,7 @@
     "skills/sdlc-verify/tools/gates/untracked.py": "16b8b8301155598398c63de163745e69b5f517fc55ffa226274f7658b758ce6c",
     "skills/sdlc-verify/tools/git_operation.py": "74ea64a97ebe6d083220c2957403b0284d687c056babd87ea7b1a82428b6b3fe",
     "skills/sdlc-verify/tools/intent-sections.py": "e94242e33f465c785997971388ac45dc3302087cf95603a0fad3e7a63d38f562",
-    "skills/sdlc-verify/tools/profile_guard.py": "e7b6897d9bb8cbdbaa8667e0bd266f465b8346214831d5c0554fd85745c6d520",
+    "skills/sdlc-verify/tools/profile_guard.py": "aea4c03e40c342e18ba70ebcbe6bbf2eb8727db4f0849cf7d55fbc36e54af3de",
     "skills/sdlc-verify/tools/review-validate.py": "45b554790118ab2f1a6c51ef639acee45b916c311da91fbbaf678865ab4f9671",
     "skills/sdlc-verify/tools/review_evidence.py": "07888cc78607c566b200b2993c4367f549fa0a75f5860ef25506a70aa1085a6d",
     "skills/sdlc-verify/tools/runner-lite.py": "49b147502648224336098b3ab63acd69e31a76744307f6aa43527686071f8c01",

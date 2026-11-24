@@ -16,6 +16,15 @@ def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def managed_names(files, kind):
+    paths = (Path(name).parts for name in files)
+    return {parts[1] for parts in paths if len(parts) > 1 and parts[0] == kind}
+
+
+def has_managed_component(directory, names):
+    return any((directory / name).exists() or (directory / name).is_symlink() for name in names)
+
+
 def plain(base, name):
     relative = Path(name)
     if relative.is_absolute() or '..' in relative.parts or not relative.parts:
@@ -57,7 +66,7 @@ def check(base, manifest_path, active_tools=None):
     if active_tools is not None and active_tools.resolve() != (base / '.agents/skills/sdlc-verify/tools').resolve():
         raise ValueError('Инструмент загружен из другого корня: ' + str(active_tools))
     legacy = base / '.codex/skills'
-    if legacy.exists() and list(legacy.glob('sdlc-*')):
+    if has_managed_component(legacy, managed_names(mapped, 'skills')):
         raise ValueError('Обнаружен второй корень SDLC: ' + str(legacy) + '; сохрани копию и явно устрани конфликт загрузки')
     return {'manifest_sha256': release, 'version': manifest['version'], 'paths': mapped,
             'manifest_path': str(manifest_path.resolve())}
@@ -70,18 +79,22 @@ def before_prepare(tools, project_root=None):
     if skills.name != 'skills' or skills.parent.name not in ('.agents', '.codex'):
         return None
     base = skills.parent.parent
+    selected = os.environ.get('SDLC_PROFILE_MANIFEST')
+    if not selected:
+        raise ValueError(f'Не задан SDLC_PROFILE_MANIFEST доверенной поставки; активные инструменты: {tools}')
+    result = check(base, Path(selected).resolve(), tools)
     if project_root is not None:
+        skill_names = managed_names(result['paths'], 'skills')
+        agent_names = managed_names(result['paths'], 'agents')
         project = project_root.resolve()
         for scope in (project, *project.parents):
             if scope == base:
                 break
-            candidates = (scope / '.agents/skills', scope / '.codex/skills', scope / '.codex/agents')
-            if any(path.exists() and list(path.glob('sdlc-*')) for path in candidates):
+            candidates = ((scope / '.agents/skills', skill_names), (scope / '.codex/skills', skill_names),
+                          (scope / '.codex/agents', agent_names))
+            if any(has_managed_component(path, names) for path, names in candidates):
                 raise ValueError('Конфликт project/user SDLC-профилей: ' + str(scope) + '; укажи единый корень компонентов')
-    selected = os.environ.get('SDLC_PROFILE_MANIFEST')
-    if not selected:
-        raise ValueError(f'Не задан SDLC_PROFILE_MANIFEST доверенной поставки; активные инструменты: {tools}')
-    return check(base, Path(selected).resolve(), tools)
+    return result
 
 
 if __name__ == '__main__':

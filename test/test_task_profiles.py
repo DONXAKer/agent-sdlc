@@ -2,6 +2,9 @@
 
 from pathlib import Path
 import json
+import os
+import string
+import subprocess
 import sys
 import unittest
 
@@ -13,6 +16,7 @@ from test import test_snapshot_base as fixtures
 from test.test_issue_regressions import flow
 from tempfile import TemporaryDirectory
 from chunk_preconditions import receipt_path
+from gate_evidence import directory, errors
 
 
 class TaskProfiles(unittest.TestCase):
@@ -60,36 +64,15 @@ class TaskProfiles(unittest.TestCase):
 
 
 class RunnerLiteTests(unittest.TestCase):
-    setUp = fixtures.SnapshotTests.setUp
+    def setUp(self):
+        fixtures.SnapshotTests.setUp(self, 'проект')
+
     git = fixtures.SnapshotTests.git
     tool = fixtures.SnapshotTests.tool
     snapshot = fixtures.SnapshotTests.snapshot
 
     def test_resume_and_reject_changed_candidate(self):
-        rows = ['| Гейт | Вкл | Где отчитывается | Чем реализован |', '|---|---|---|---|']
-        for name in MANDATORY_GATES:
-            command = 'git version' if name in ('Scope: файлы вне плана', 'Анти-обход тест-гейта') else 'git --version'
-            rows.append(f'| {name} | да | этап 6 | `{command}` |')
-        (self.d.parent / 'gates.md').write_text('\n'.join(rows), encoding='utf-8')
-        context = {'version': 1, 'commands': [
-            {'command': 'git version', 'inputs': {'PATCH': 'patch', 'LAYER': 'layer'}},
-            {'command': 'git --version', 'inputs': {'LAYER': 'layer'}},
-        ]}
-        (self.d.parent / 'gate-context.json').write_text(json.dumps(context), encoding='utf-8')
-        intent = self.d / 'intent.md'
-        text = intent.read_text(encoding='utf-8') + '\n**Профиль задачи:** docs-config\n'
-        intent.write_bytes(text.replace('\n', '\r\n').encode('utf-8'))
-        self.snapshot()
-        (self.d / 'locator.md').write_text('app.py', encoding='utf-8')
-        (self.d / 'chunk-1-journal.md').write_text('Начало работы', encoding='utf-8')
-        for _ in range(2):
-            result = self.tool('runner-lite.py', 'prepare', self.root, 'T-1', 1, '--locator', 'locator.md')
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        source = self.root / 'app.py'
-        source.write_bytes(b'answer = 2\n')
-        def check(*flags):
-            return self.tool('runner-lite.py', 'check', self.root, 'T-1', 1, 1, '--executor-model', 'test',
-                             '--layer', 'integration', *flags)
+        check = self.prepare_candidate(self.root, 'git --version')
         for _ in range(2):
             result = check()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -107,8 +90,56 @@ class RunnerLiteTests(unittest.TestCase):
         self.assertIn('--resume-gates', result.stderr)
         result = check('--resume-gates')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        source.write_bytes(b'answer = 3\n')
+        (self.root / 'app.py').write_bytes(b'answer = 3\n')
         self.assertNotEqual(check().returncode, 0)
+
+    @unittest.skipUnless(os.name == 'nt', 'subst доступен в Windows')
+    def test_check_preserves_subst_working_directory(self):
+        drive = next((f'{letter}:' for letter in reversed(string.ascii_uppercase)
+                      if not Path(f'{letter}:/').exists()), None)
+        if drive is None:
+            self.skipTest('Нет свободной буквы диска для subst')
+        result = subprocess.run(['subst', drive, str(self.root)], capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.addCleanup(subprocess.run, ['subst', drive, '/d'], check=True)
+        alias = Path(drive + '/')
+        self.assertTrue(alias.samefile(self.root))
+        command = f'"{Path(sys.executable).as_posix()}" -c "import os; print(os.getcwd())"'
+        check = self.prepare_candidate(alias, command)
+        result = check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        gate = directory(self.d, 1, 1, 'Тесты')
+        receipt = max(gate.glob('run-*/receipt.json'))
+        self.assertEqual(Path(receipt.with_name('output.txt').read_text(encoding='utf-8').strip()), alias)
+        self.assertEqual(errors(self.root, self.d, 1, 1, 'Тесты'), [])
+
+    def prepare_candidate(self, root, tests_command):
+        rows = ['| Гейт | Вкл | Где отчитывается | Чем реализован |', '|---|---|---|---|']
+        for name in MANDATORY_GATES:
+            command = 'git version' if name in ('Scope: файлы вне плана', 'Анти-обход тест-гейта') else 'git --version'
+            if name == 'Тесты':
+                command = tests_command
+            rows.append(f'| {name} | да | этап 6 | `{command}` |')
+        (self.d.parent / 'gates.md').write_text('\n'.join(rows), encoding='utf-8')
+        context = {'version': 1, 'commands': [
+            {'command': 'git version', 'inputs': {'PATCH': 'patch', 'LAYER': 'layer'}},
+            {'command': 'git --version', 'inputs': {'LAYER': 'layer'}},
+        ]}
+        (self.d.parent / 'gate-context.json').write_text(json.dumps(context), encoding='utf-8')
+        intent = self.d / 'intent.md'
+        text = intent.read_text(encoding='utf-8') + '\n**Профиль задачи:** docs-config\n'
+        intent.write_bytes(text.replace('\n', '\r\n').encode('utf-8'))
+        self.snapshot()
+        (self.d / 'locator.md').write_text('app.py', encoding='utf-8')
+        (self.d / 'chunk-1-journal.md').write_text('Начало работы', encoding='utf-8')
+        for _ in range(2):
+            result = self.tool('runner-lite.py', 'prepare', self.root, 'T-1', 1, '--locator', 'locator.md')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (self.root / 'app.py').write_bytes(b'answer = 2\n')
+        def check(*flags):
+            return self.tool('runner-lite.py', 'check', root, 'T-1', 1, 1, '--executor-model', 'test',
+                             '--layer', 'integration', *flags)
+        return check
 
 
 if __name__ == '__main__':

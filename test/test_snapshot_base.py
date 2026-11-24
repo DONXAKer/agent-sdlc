@@ -20,10 +20,13 @@ from test.evidence_fixtures import parser_receipt
 
 
 class SnapshotTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self, subdirectory=None):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        if subdirectory:
+            self.root /= subdirectory
+            self.root.mkdir()
         self.git('init', '-q')
         self.git('config', 'user.email', 'test@example.invalid')
         self.git('config', 'user.name', 'Тест')

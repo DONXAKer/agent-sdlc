@@ -1,7 +1,9 @@
 """Регрессии issue №6: единая неизменяемая dirty-база и сохранение Git-режима."""
 
+import errno
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -9,10 +11,12 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / 'implementations/claude-code/skills/sdlc-verify/tools'
 sys.path.insert(0, str(TOOLS))
+import chunk_preconditions
 import snapshot_base
 from sdlc_common import execution_lock
 sys.path.insert(0, str(ROOT))
@@ -92,6 +96,64 @@ class SnapshotTests(unittest.TestCase):
         self.plan.write_text(plan.replace('| new.py | правка |', '| new.py | [new] создать |'), encoding='utf-8')
         result = prepare()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_prepare_retries_incomplete_blob_and_reuses_project_store(self):
+        binary = b'\x00\xff' * 128
+        (self.root / 'asset.bin').write_bytes(binary)
+        self.git('add', 'asset.bin')
+        self.git('commit', '-qm', 'Добавить бинарный файл')
+        base = self.git('rev-parse', 'HEAD').stdout.strip()
+        plan = self.plan.read_text(encoding='utf-8').replace(self.base, base).replace('snapshot', 'git')
+        self.plan.write_text(plan, encoding='utf-8')
+        (self.d / 'locator.md').write_text('Проверена область.', encoding='utf-8')
+        (self.d / 'chunk-1-journal.md').write_text('Подготовка.', encoding='utf-8')
+        second = shutil.copytree(self.d, self.d.with_name('T-2'))
+        store = self.d.parent / '.chunk-blobs'
+        binary_sha = snapshot_base.digest(binary)
+        script = TOOLS / 'attempt-evidence.py'
+        args = ('prepare', str(self.root), self.d.name, '1', '--locator', 'locator.md')
+        write_bytes = Path.write_bytes
+
+        def interrupted_write(path, raw):
+            if path.name == binary_sha:
+                write_bytes(path, raw[:1])
+                raise OSError(errno.ENOSPC, 'Нет места для объекта')
+            return write_bytes(path, raw)
+
+        with patch.object(Path, 'write_bytes', interrupted_write), patch.object(sys, 'argv', [str(script), *args]):
+            with self.assertRaises(OSError) as failure:
+                runpy.run_path(str(script), run_name='__main__')
+        self.assertEqual(failure.exception.errno, errno.ENOSPC)
+        self.assertFalse((store / binary_sha).exists())
+        self.assertFalse((self.d / '.chunk-blobs' / binary_sha).exists())
+        self.assertFalse(list(store.glob('.prepare-*')))
+        self.assertFalse(chunk_preconditions.receipt_path(self.d, 1).exists())
+
+        result = self.tool(script.name, *args)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        stamp = (store / binary_sha).stat().st_mtime_ns
+        result = self.tool(script.name, 'prepare', self.root, second.name, 1, '--locator', 'locator.md')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((store / binary_sha).stat().st_mtime_ns, stamp)
+        self.assertEqual(list(self.d.parent.rglob(binary_sha)), [store / binary_sha])
+        for directory in (self.d, second):
+            self.assertEqual(chunk_preconditions.errors(self.root, directory, 1), [])
+            tree = chunk_preconditions.load_tree(self.root, directory, 1)
+            self.assertEqual(tree['asset.bin'][0], binary)
+
+    def test_prepare_reads_legacy_cycle_objects(self):
+        (self.d / 'locator.md').write_text('Проверена область.', encoding='utf-8')
+        (self.d / 'chunk-1-journal.md').write_text('Подготовка.', encoding='utf-8')
+        self.snapshot()
+        result = self.tool('attempt-evidence.py', 'prepare', self.root, self.d.name, 1, '--locator', 'locator.md')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        receipt = chunk_preconditions.receipt_path(self.d, 1)
+        historical = json.loads(receipt.read_bytes())
+        del historical['tree']['storage']
+        receipt.write_text(json.dumps(historical), encoding='utf-8')
+        (self.d.parent / '.chunk-blobs').rename(self.d / '.chunk-blobs')
+        self.assertEqual(chunk_preconditions.errors(self.root, self.d, 1), [])
+        self.assertIn('app.py', chunk_preconditions.load_tree(self.root, self.d, 1))
 
     def test_readiness_amendment_preserves_receipt_and_rejects_silent_changes(self):
         (self.d / 'locator.md').write_text('Проверена область.', encoding='utf-8')

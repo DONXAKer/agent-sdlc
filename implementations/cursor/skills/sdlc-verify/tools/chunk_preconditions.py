@@ -12,6 +12,7 @@ from sdlc_common import ARTIFACTS_DIR, CHUNK_FILES, artifact_targets, defect_cla
 from sdlc_common import git_run, planned_paths
 
 PREPARE_VERSION = 2
+PROJECT_BLOB_STORE = '.chunk-blobs'
 
 
 def receipt_path(d, n):
@@ -36,6 +37,19 @@ def artifact(d, name):
     if not target.is_file():
         raise ValueError(f'Артефакт предусловий отсутствует: {name}')
     return target
+
+
+def publish(path, raw, expected_sha=None):
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix='.prepare-') as tmp:
+        staged = Path(tmp) / path.name
+        staged.write_bytes(raw)
+        if expected_sha is not None and snapshot_base.digest(staged.read_bytes()) != expected_sha:
+            raise ValueError('Хэш записанного объекта базы chunk отличается')
+        staged.replace(path)
+
+
+def project_blob_store(root):
+    return snapshot_base.safe_path(root, f'{ARTIFACTS_DIR}/{PROJECT_BLOB_STORE}')
 
 
 def normalized_readiness(raw):
@@ -184,8 +198,7 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
     if plan_archive.exists() and text_digest(plan_archive) != record['plan_sha256']:
         raise ValueError('Историческая редакция плана уже существует и отличается')
     if not plan_archive.exists():
-        with plan_archive.open('xb') as output:
-            output.write((d / 'plan.md').read_bytes())
+        publish(plan_archive, (d / 'plan.md').read_bytes())
     record['plan_path'] = plan_archive.name
     record['documents'] = {}
     for name in ('intent.md', 'readiness.md'):
@@ -194,36 +207,34 @@ def create(root, d, n, locator, current_diff, capture_baseline, profile=None):
         if archive.exists() and archive.read_bytes() != raw:
             raise ValueError('Историческая редакция документа уже существует и отличается')
         if not archive.exists():
-            archive.write_bytes(raw)
+            publish(archive, raw)
         record['documents'][name] = {'path': archive.name, 'sha256': snapshot_base.digest(raw)}
     tree = {}
-    blobs = d / '.chunk-blobs'
+    blobs = project_blob_store(root)
     blobs.mkdir(exist_ok=True)
     for name, (data, mode) in snapshot_base.project_files(root, git_special=base['kind'] == 'git', d=d).items():
         digest = snapshot_base.digest(data)
         blob = blobs / digest
-        if blob.exists() and blob.read_bytes() != data:
-            raise ValueError('Байты базы chunk изменены')
-        if not blob.exists():
-            blob.write_bytes(data)
+        if blob.exists() or blob.is_symlink():
+            if artifact(blobs, digest).read_bytes() != data:
+                raise ValueError('Байты базы chunk изменены')
+        else:
+            publish(blob, data, digest)
         tree[name] = {'sha256': digest, 'mode': mode}
     tree_path = d / f'.chunk-{n}-tree.json'
     raw = (json.dumps(tree, sort_keys=True) + '\n').encode('utf-8')
     if tree_path.exists() and tree_path.read_bytes() != raw:
         raise ValueError('Историческая база chunk уже существует и отличается')
     if not tree_path.exists():
-        tree_path.write_bytes(raw)
-    record['tree'] = {'path': tree_path.name, 'sha256': snapshot_base.digest(raw)}
+        publish(tree_path, raw)
+    record['tree'] = {'path': tree_path.name, 'sha256': snapshot_base.digest(raw), 'storage': 'project'}
     journal_archive = d / f'.chunk-{n}-initial-journal.md'
     if journal_archive.exists() and text_digest(journal_archive) != text_digest(journal):
         raise ValueError('Начальная редакция журнала уже существует и отличается')
     if not journal_archive.exists():
-        with journal_archive.open('xb') as output:
-            output.write(journal.read_bytes())
+        publish(journal_archive, journal.read_bytes())
     record['journal'] = {'path': journal_archive.name, 'sha256': text_digest(journal_archive)}
-    with target.open('x', encoding='utf-8') as output:
-        json.dump(record, output, ensure_ascii=False, indent=2)
-        output.write('\n')
+    publish(target, (json.dumps(record, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
     return record
 
 
@@ -296,6 +307,10 @@ def load_tree(root, d, n):
     """Прочитай исходные байты chunk по закреплённому manifest."""
     rec = json.loads(receipt_path(d, n).read_bytes())
     tree = rec['tree']
+    storage = tree.get('storage', 'cycle')
+    if storage not in ('cycle', 'project'):
+        raise ValueError('Недопустимое хранилище базы chunk')
+    blobs = project_blob_store(root) if storage == 'project' else d
     raw = artifact(d, tree['path']).read_bytes()
     if snapshot_base.digest(raw) != tree['sha256']:
         raise ValueError('Manifest базы chunk изменён')
@@ -305,7 +320,7 @@ def load_tree(root, d, n):
         snapshot_base.safe_path(root, name, follow=mode != 0o120000)
         if not re.fullmatch('[0-9a-f]{64}', sha) or mode not in (0o644, 0o755, 0o120000, 0o160000):
             raise ValueError('Недопустимая запись базы chunk')
-        data = artifact(d, '.chunk-blobs/' + sha).read_bytes()
+        data = artifact(blobs, sha if storage == 'project' else '.chunk-blobs/' + sha).read_bytes()
         if snapshot_base.digest(data) != sha:
             raise ValueError('Байты базы chunk изменены')
         result[name] = (data, mode)

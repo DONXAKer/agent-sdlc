@@ -276,7 +276,8 @@ def baseline_mode(root: Path, slug: str, n: str, snapshot_status=None) -> int:
         if p.is_file():
             base[path] = hashlib.sha256(p.read_bytes()).hexdigest()
     target = d / f".chunk-{n}-baseline.json"
-    target.write_text(json.dumps(base, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    data = (json.dumps(base, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    chunk_preconditions.publish(target, data)
     print(json.dumps({"baseline": target.name, "dirty_files": sorted(base)}, ensure_ascii=False))
     if snapshot_status is None and base:
         print(f"дерево грязное: {len(base)} чужих незакоммиченных файлов — назови их человеку до правок")
@@ -426,17 +427,18 @@ def main() -> int:
     if a.mode == 'prepare':
         profile = profile_guard.before_prepare(Path(__file__).parent, root)
         d = root / ARTIFACTS_DIR / a.slug
-        base, snapshot = snapshot_base.load(root, d)
-        current = regenerate_diff(root, base['id'], canonical=True, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
-        snapshot_status = None
-        if snapshot is not None:
-            snapshot_status = workspace_status(root)
-            print(f'Отличия рабочего дерева от Git HEAD: {len(snapshot_status.splitlines())} путей')
-            paths = diffstat(current)['paths']
-            print(f'Изменения относительно снимка: {len(paths)} путей' + (': ' + ', '.join(paths) if paths else ''))
-        receipt = chunk_preconditions.create(root, d, a.n, a.locator, current,
-                                              lambda: baseline_mode(root, a.slug, a.n, snapshot_status),
-                                              profile=profile)
+        with execution_lock(snapshot_base.safe_path(root, '.sdlc/.gate-run.lock')):
+            base, snapshot = snapshot_base.load(root, d)
+            current = regenerate_diff(root, base['id'], canonical=True, d=d) if snapshot is None else snapshot_base.snapshot_diff(root, snapshot, d=d)
+            snapshot_status = None
+            if snapshot is not None:
+                snapshot_status = workspace_status(root)
+                print(f'Отличия рабочего дерева от Git HEAD: {len(snapshot_status.splitlines())} путей')
+                paths = diffstat(current)['paths']
+                print(f'Изменения относительно снимка: {len(paths)} путей' + (': ' + ', '.join(paths) if paths else ''))
+            receipt = chunk_preconditions.create(root, d, a.n, a.locator, current,
+                                                 lambda: baseline_mode(root, a.slug, a.n, snapshot_status),
+                                                 profile=profile)
         print(json.dumps(receipt, ensure_ascii=False))
         return 0
     if a.mode == 'snapshot':
@@ -449,7 +451,8 @@ def main() -> int:
                 snapshot_base.safe_path(root, '.sdlc/.gate-run.lock')):
             return write_mode(root, a.slug, a.n, a.k, a.tests_cmd, a.executor_model, a.force, a.layer, a.resume)
     if a.mode == "baseline":
-        return baseline_mode(root, a.slug, a.n)
+        with execution_lock(snapshot_base.safe_path(root, '.sdlc/.gate-run.lock')):
+            return baseline_mode(root, a.slug, a.n)
     if a.mode == "compare":
         return compare_mode(root, a.slug, a.n, a.k1, a.k2)
     return verify_mode(root, a.slug, a.n, a.k)

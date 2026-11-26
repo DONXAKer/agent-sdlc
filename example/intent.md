@@ -1,11 +1,5 @@
 # Задача: TASK-001 — идемпотентность создания платежа
 
-> Заполненный пример по [`../templates/intent.template.md`](../templates/intent.template.md). Читать вместе с
-> [`readiness.md`](readiness.md), [`exploration-report.md`](exploration-report.md),
-> [`plan.md`](plan.md), [`chunk-1-journal.md`](chunk-1-journal.md),
-> [`verification-report-1-attempt-1.md`](verification-report-1-attempt-1.md) и
-> [`gates.md`](gates.md) — это один виток от цели до приёмки.
-
 - **Контур:** полный — четыре файла, меняется контракт ответа (код `200` на повторе), гонки
 - **Ветка витка:** `sdlc/TASK-001`
 
@@ -53,9 +47,6 @@
 | claim-10 | `[edge]` Проигравший в гонке получает `paymentId` победителя | тот же тест, третий ассерт — критерий: `paymentId` проигравшего равен `paymentId` победителя | performance |
 | claim-11 | `[edge]` При гонке `PaymentCreatedEvent` публикуется ровно один раз | `PaymentIdempotencyIT.concurrentPublishesEventOnce` — Given подписчик-счётчик · When два потока с `K` одновременно · Then перехвачено ровно одно событие с этим `paymentId` | performance |
 
-_Отдельной колонки Given-When-Then нет: для одношаговых пунктов она пересказывала бы процедуру
-третий раз. Многошаговым сценариям гонки шаги вписаны прямо в «Как проверить»._
-
 ## Инварианты
 
 - Нет прямых SQL-запросов вне репозиторного слоя — проверяется `grep -rn "createQuery\|jdbcTemplate" --include=*.java src/main/java/com/acme/payments/{service,web}`
@@ -64,8 +55,6 @@ _Отдельной колонки Given-When-Then нет: для одношаг
   `PaymentControllerTest.createResponseContract` (не менять)
 
 ## Когда остановиться и спросить
-
-_Только проектные условия; общие точки остановки — норма `SDLC.md`, сюда не переписываются._
 
 - Потребовалось тронуть `common/idempotency` или схему таблицы ключей — остановиться и спросить:
   механизм общий с заказами, и его правка задевает чужой домен
@@ -82,8 +71,6 @@ _Заполнено агентом на разведке, проверено ч�
 - `src/test/java/com/acme/payments/PaymentIdempotencyIT.java` — новый интеграционный тест
 
 ## Открытые вопросы
-
-_Отвеченные закрыты здесь чекбоксом; разбор — в [`clarification-report.md`](clarification-report.md)._
 
 - [x] **[блокирующий]** Что возвращать при повторе — `200` или `201`? → `200`, чтобы клиент мог
       отличить повтор от первого создания

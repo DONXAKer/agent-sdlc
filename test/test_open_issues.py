@@ -748,9 +748,11 @@ class MethodologyPracticeTests(unittest.TestCase):
         intent = (ROOT / 'templates/intent.template.md').read_text(encoding='utf-8')
         handoff = (ROOT / 'templates/handoff.template.md').read_text(encoding='utf-8')
         self.assertNotIn('| Класс Кано |', intent)
-        self.assertIn('Предложения ИИ добавляй в приёмку только после явного одобрения', intent)
+        intent_rules = self.sdlc.split('## intent\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Предложения ИИ добавляй в приёмку только после явного одобрения', intent_rules)
         self.assertIn('**честная остановка**', handoff)
-        self.assertIn('не расходует бюджет ремонтов, не является отказом модели', handoff)
+        handoff_rules = self.sdlc.split('## handoff\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('не расходует бюджет ремонтов, не является отказом модели', handoff_rules)
         example_handoff = (ROOT / 'example/handoff.md').read_text(encoding='utf-8')
         self.assertIn("виток продолжается\n  следующей попыткой chunk'а 1\n- **Андон:** н/п", example_handoff)
         self.assertIn('Нельзя скрывать исключения `must-be` ради снижения метрики human-required', self.sdlc)
@@ -765,16 +767,17 @@ class MethodologyPracticeTests(unittest.TestCase):
             self.assertIn(heading, template)
         for n in range(1, 6):
             self.assertIn(f'**Почему {n}:**', template)
-        self.assertIn('класс дефекта → системная корневая причина → контрмера', template)
-        self.assertIn('Несвязанная задача', template)
+        rules = self.sdlc.split('## retro-a3\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('класс дефекта → системная корневая причина → контрмера', rules)
+        self.assertIn('Несвязанная задача', rules)
         self.assertIn('открыт / перенесён', template)
         self.assertNotIn('legacy-no-change', template)
         self.assertNotIn('legacy-verify-text', template)
         self.assertIn('**Первый персистентный отчёт серии:**', template)
         self.assertIn('## Отклонённые находки', template)
-        self.assertIn('Добавь подтверждённые открытые уроки из проверенных отчётов', template)
-        self.assertIn('не открывай его заново без нового дефекта', template)
-        self.assertIn('не закрывает автоматически прежние задачи', template)
+        self.assertIn('Добавь подтверждённые открытые уроки из проверенных отчётов', rules)
+        self.assertIn('не открывай его заново без нового дефекта', rules)
+        self.assertIn('не закрывает автоматически прежние задачи', rules)
         for name in ('codex', 'claude-code'):
             skill = (ROOT / f'implementations/{name}/skills/sdlc-retro/SKILL.md').read_text(encoding='utf-8')
             self.assertIn('retro-a3.template.md', skill)
@@ -816,7 +819,6 @@ class PlanChecksVsProjectGatesTests(unittest.TestCase):
     def setUp(self):
         self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
         self.plan = (ROOT / 'templates/plan.template.md').read_text(encoding='utf-8')
-        self.report = (ROOT / 'templates/verification-report.template.md').read_text(encoding='utf-8')
         self.example = (ROOT / 'example/plan-checks-and-gates.md').read_text(encoding='utf-8')
 
     def test_contract_states_two_independent_obligations_and_weak_link_verdict(self):
@@ -835,7 +837,7 @@ class PlanChecksVsProjectGatesTests(unittest.TestCase):
         for fragment in ('фактически выполненную команду, код возврата и счёт',
                          'каталог её запуска',
                          'версия инструмента'):
-            self.assertIn(fragment, self.report)
+            self.assertIn(fragment, self.sdlc.split('## verification-report\n', 1)[1])
 
     def test_example_with_two_stacks_shows_commands_and_acceptance_reasons(self):
         for fragment in ('ledger-svc', 'cabinet-web',

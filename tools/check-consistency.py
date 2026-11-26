@@ -19,7 +19,7 @@ CLAUDE.md перечисляет сквозные инварианты («одн
   9. имена файлов реализации (*.py), упомянутые в SDLC.md и шаблонах, существуют в дереве;
  10. test/README.md перечисляет все кейсы корпуса flow-verdict;
  11. каждый шаблон начинается строкой версии формы `<!-- sdlc-template: <имя> vN -->`;
- 12. словарь вердикта готовности readiness_verdicts согласован в константах, шаблоне и коде.
+ 12. словарь вердикта готовности readiness_verdicts согласован в константах, правилах заполнения и коде.
 
 Запуск: python tools/check-consistency.py   (код возврата 1 при расхождении)
 """
@@ -124,7 +124,7 @@ if "## Классы дефектов проекта" not in ex_text:
     fail("example/gates.md", "нет секции «Классы дефектов проекта» из шаблона")
 
 # --- 3. Оси ----------------------------------------------------------------------------------
-AXES_CONSUMERS = ["SDLC.md", "templates/plan.template.md", "templates/exploration-report.template.md",
+AXES_CONSUMERS = ["SDLC.md",
                   "implementations/claude-code/agents/sdlc-reviewer.md",
                   "implementations/claude-code/skills/sdlc-plan/SKILL.md",
                   "implementations/claude-code/skills/sdlc-explore/SKILL.md"]
@@ -236,7 +236,7 @@ CONSUMERS = {
     "axis_outcomes": lambda: all(tok.split(" ")[0] in templates_text for tok in C["axis_outcomes"]),
     "axis_outcome_patterns": lambda: set(C['axis_outcome_patterns']) == set(C['axis_outcomes']) and
                                         "axis_outcome_patterns" in py_text,
-    "gate_switches": lambda: "gate_switches" in py_text and "gate_switches" in read('templates/gates.template.md'),
+    "gate_switches": lambda: "gate_switches" in py_text and "gate_switches" in read("SDLC.md"),
     "gate_statuses": lambda: "/".join(C["gate_statuses"]) in templates_text,
     "claim_statuses": lambda: "/".join(C["claim_statuses"]) in templates_text,
     "actions": lambda: '"actions"' in py_text and " / ".join(C["actions"]) in templates_text,
@@ -252,7 +252,7 @@ CONSUMERS = {
     "verdict_table": lambda: True,
     "overwrite_threshold_percent": lambda: '"overwrite_threshold_percent"' in py_text,
     "readiness_verdicts": lambda: '"readiness_verdicts"' in py_text and
-                                  "readiness_verdicts" in read("templates/readiness.template.md"),
+                                  "readiness_verdicts" in read("SDLC.md"),
     "defect_classes": lambda: all(cls in sdlc for cls in C["defect_classes"]),
     "defect_class_aliases": lambda: 'defect_class_aliases' in py_text and all(
         target in C['defect_classes'] and alias not in C['defect_classes']
@@ -295,12 +295,12 @@ for p in (ROOT / "templates").glob("*.template.md"):
 
 # --- 12. Словарь вердикта готовности ------------------------------------------------------------
 rv = C["readiness_verdicts"]
-ready_tpl = read("templates/readiness.template.md")
+ready_rules = read("SDLC.md").split("## readiness\n", 1)[-1].split("\n## ", 1)[0]
 for value in (rv["ready"], rv["not_ready"]):
-    if f"`{value}`" not in ready_tpl:
-        fail("templates/readiness.template.md", f"словарное значение вердикта «{value}» не названо в строгом правиле")
-if "Вердикт — ровно" not in ready_tpl:
-    fail("templates/readiness.template.md", "нет строки строгого правила вердикта")
+    if f"`{value}`" not in ready_rules:
+        fail("SDLC.md", f"словарное значение вердикта «{value}» не названо в строгом правиле")
+if "Вердикт — ровно" not in ready_rules:
+    fail("SDLC.md", "нет строки строгого правила вердикта")
 master_common = read("implementations/claude-code/skills/sdlc-verify/tools/sdlc_common.py")
 if '"readiness_verdicts"' not in master_common:
     fail("sdlc_common.py", "readiness_ok не читает словарь readiness_verdicts из констант")

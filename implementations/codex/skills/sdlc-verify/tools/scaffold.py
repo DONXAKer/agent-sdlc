@@ -176,10 +176,8 @@ def fill(stage: str, root: Path, slug: str, n: str, k: str, run: str) -> str:
                  "этап 5": f"`chunk-{n}-journal.md`"}
         if early:
             t = replace_row(t, "| ‹гейт› | ‹этап› |", [f"| {g} | {st.split()[-1]} | ‹✅/❌/⏭› | {where[st]} |" for g, st in early])
-            t = t.replace("Включённых гейтов ранних этапов нет / таблица ниже заполнена:", "Таблица ранних гейтов — по набору:")
         else:
             t = replace_row(t, "| ‹гейт› | ‹этап› |", [])
-            t = t.replace("Включённых гейтов ранних этапов нет / таблица ниже заполнена:", "Включённых гейтов ранних этапов нет.")
         t = replace_row(t, "| claim-1 | ‹начало пункта…› |",
                         [f"| {cid} | {words} | ‹✅/❌/⚠/manual› | ‹доказательство› | ‹что чинить› / н/п |" for cid, words in claims(intent)]
                         or ["| claim-1 | ‹начало пункта…› | ‹✅/❌/⚠/manual› | ‹доказательство› | ‹что чинить› / н/п |"])

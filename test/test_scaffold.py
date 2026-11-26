@@ -118,7 +118,7 @@ class ScaffoldTests(unittest.TestCase):
         self.assertIn("**Бюджет попыток:** 5", j)
         self.assertIn("одобрение от 2026-08-02", j)
         self.assertIn("**Подтвердил:** ‹имя› · ‹дата›", j)
-        self.assertIn("chunk-2-attempt-‹K›-diff.patch", j)              # ‹K› — обобщённый номер попытки
+        self.assertIn("verification-report-2-attempt-‹K›.md", j)
         self.assertIn("verification-report-2-attempt-‹K›.md", j)
         self.assertNotIn("attempt-1-diff", j)
         proc = run(SCAFFOLD, self.root, "verification-report", "T-1", "--chunk", "2", "--attempt", "3")
@@ -142,9 +142,13 @@ class ScaffoldTests(unittest.TestCase):
             "| 1 | 2026-08-01 | первая | н/п | retry |\n| 2 | 01.08.2026 | вторая | x | retry |\n| 3 |  | третья | y | passed |\n"
             "| 4 | ‹дата› | образец | ‹…› | ‹…› |\n", encoding="utf-8")
         self.assertEqual(run(SCAFFOLD, self.root, "handoff", "T-1").returncode, 0)
+        first = (self.d / "handoff.md").read_text(encoding="utf-8")
         self.assertEqual(run(SCAFFOLD, self.root, "handoff", "T-1").returncode, 0)   # без --run: номер выводится сам
         self.assertEqual(run(SCAFFOLD, self.root, "handoff", "T-1", "--run", "7").returncode, 0)
         h = (self.d / "handoff.md").read_text(encoding="utf-8")
+        self.assertTrue(h.startswith(first.rstrip("\n") + "\n\n## Виток 2"))
+        self.assertNotIn("Секции витков располагай", h)
+        self.assertNotIn("Для нового витка добавь", h)
         self.assertEqual([m for m in re.findall(r"^## Виток (\d+)", h, re.M)], ["1", "2", "7"])
         self.assertIn("slug: T-1", h)
         self.assertIn("branch: sdlc/T-1", h)

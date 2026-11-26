@@ -1,8 +1,5 @@
 # План: TASK-001 — идемпотентность создания платежа
 
-> Заполненный пример по [`../templates/plan.template.md`](../templates/plan.template.md).
-> Одобрен человеком до начала реализации — и одобрение записано полем, а не оставлено в чате.
-
 - **Задача:** [`intent.md`](intent.md) (TASK-001)
 - **Вход:** exploration-report да · [clarification-report](clarification-report.md) да — разведка
   вскрыла развилки, человек ответил

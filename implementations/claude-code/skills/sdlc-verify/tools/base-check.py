@@ -10,10 +10,10 @@
    и спросить». Список печатается как `base_failures`.
 2. **Гейт «Тесты красные на базе».** На ту же базу накладываются только hunk'и тестовых файлов
    патча попытки, и команда прогоняется ещё раз. Гейт `pass`, если тестовые hunk'и дали НОВЫЕ
-   падения относительно чистой базы (по идентификаторам упавших тестов, а при неизвестном
-   раннере — по коду возврата и числу строк-падений); `fail`, если новых падений нет — тесты
-   попытки зелёные до правки кода и ничего не доказывают, даже когда база и так красная от
-   чужого теста. Тестовых файлов в патче нет — `skip`; инструмент тестов отсутствует —
+   падения относительно чистой базы. Сравниваются идентификаторы упавших тестов.
+   Один код возврата или общая строка ошибки оставляет гейт неподтверждённым (`fail`).
+   Семантику утверждения теста проверяет независимое ревью.
+   Тестовых файлов в патче нет — `skip`; инструмент тестов отсутствует —
    `skip` с `missing_tool` (никогда `pass`).
 Вывод — JSON последней строкой (контракт gates/_common.py); строкой выше — JSON с
 base_exit, base_failures, tests_on_base, new_failures.
@@ -39,20 +39,18 @@ import snapshot_base
 
 GATE = "Тесты красные на базе"
 FAIL_LINE = re.compile(
-    r"^(?:FAILED|ERROR)\s+(\S+)"                  # pytest: FAILED tests/x.py::test_a
-    r"|^(?:FAIL|ERROR):\s+(\S+(?:\s+\([^)]+\))?)"  # unittest: FAIL: test_a (mod.Cls)
-    r"|^\s*(?:✕|×|✘)\s+(.+)$"                     # jest/vitest
-    r"|^(\S+(?:\s*>\s*\S+)*)\s+FAILED\b"          # gradle: Class > method FAILED
-    r"|^\s*\[(?:FAIL|ERROR)\]\s+(.+)$"            # dotnet/go
-    r"|^--- FAIL:\s+(\S+)", re.M)
+    r"^FAILED[ \t]+(\S+::\S+)"                       # pytest: FAILED tests/x.py::test_a
+    r"|^FAIL:[ \t]+(\S+[ \t]+\([^\r\n]+\))$"         # unittest: FAIL: test_a (mod.Cls)
+    r"|^[ \t]*(?:✕|×|✘)[ \t]+(.+?)(?:[ \t]+\(\d+(?:\.\d+)?[ \t]*(?:ms|s)\))?$"  # Jest/Vitest
+    r"|^(\S+[ \t]+>[ \t]+[^\r\n]+)[ \t]+FAILED$"     # Gradle: Class > method FAILED
+    r"|^--- FAIL:[ \t]+(\S+)", re.M)                   # Go: --- FAIL: TestFoo
 
 
 def failures_of(output: str):
     ids = set()
-    for m in FAIL_LINE.finditer(output):
+    for m in FAIL_LINE.finditer(output.replace('\r\n', '\n')):
         ident = next(g for g in m.groups() if g).strip()
-        if not ident.startswith("("):  # «FAILED (failures=1)» — итог раннера, не тест
-            ids.add(ident)
+        ids.add(ident)
     return ids
 
 
@@ -147,10 +145,13 @@ def main() -> int:
     print(json.dumps(info, ensure_ascii=False))
     if fails_clean:
         print(f"на чистой базе уже красные ({len(fails_clean)}): чужие падающие тесты, не регрессия chunk'а")
-    if rc_tests != 0 and (rc_clean == 0 or new_failures
-                          or len(re.findall(r"\b(FAIL|FAILED|ERROR)\b", out_tests)) > len(re.findall(r"\b(FAIL|FAILED|ERROR)\b", out_clean))):
-        return emit(GATE, "pass", new_failures or [f"код возврата тестов на базе с тестовыми hunk'ами: {rc_tests}"],
+    if rc_clean != 0 and not fails_clean:
+        return emit(GATE, "fail", [], "прогон чистой базы завершился без распознанных падений тестов")
+    if rc_tests == 1 and new_failures:
+        return emit(GATE, "pass", new_failures,
                     "тесты попытки красные на базе — правка кода им нужна")
+    if rc_tests != 0:
+        return emit(GATE, "fail", [], "прогон не подтвердил новое падение теста на базе")
     return emit(GATE, "fail", ["тестовые hunk'и патча не дали новых падений на базе без правок кода"],
                 "новые/изменённые тесты проходят ДО правки — они не доказывают пункты, которые закрывают")
 

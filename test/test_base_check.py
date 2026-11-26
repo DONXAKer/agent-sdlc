@@ -93,6 +93,49 @@ class BaseCheckTests(unittest.TestCase):
         self.assertEqual((rc, gate["status"]), (0, "pass"), out)
         self.assertEqual(info["base_exit"], 0)
         self.assertIn("test_claim_2_sum", " ".join(info["new_failures"]))
+        candidate = subprocess.run([sys.executable, '-m', 'unittest', 'tests.test_app.T.test_claim_2_sum'],
+                                   cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(candidate.returncode, 0, candidate.stdout + candidate.stderr)
+
+    def test_syntax_error_does_not_confirm_regression(self):
+        path = self.root / 'tests/test_app.py'
+        path.write_text('print(42)\n', encoding='utf-8')
+        git(['commit', '-qam', 'green base'], self.root)
+        self.set_base()
+        path.write_text('value =\n', encoding='utf-8')
+        self.snapshot()
+        command = f'"{PY}" tests/test_app.py'
+        rc, gate, info, out = self.run_tool('--tests-cmd', command)
+        self.assertEqual((rc, gate['status']), (1, 'fail'), out)
+        self.assertEqual(info['base_exit'], 0)
+        self.assertEqual(info['new_failures'], [])
+
+    def test_generic_error_does_not_confirm_regression_on_red_base(self):
+        path = self.root / 'tests/test_app.py'
+        script = 'print("FAIL: test_existing (tests.T)")\nraise SystemExit(1)\n'
+        path.write_text(script, encoding='utf-8')
+        git(['commit', '-qam', 'red base'], self.root)
+        self.set_base()
+        path.write_text('print("ERROR build failed")\n' + script, encoding='utf-8')
+        self.snapshot()
+        command = f'"{PY}" tests/test_app.py'
+        rc, gate, info, out = self.run_tool('--tests-cmd', command)
+        self.assertEqual((rc, gate['status']), (1, 'fail'), out)
+        self.assertEqual(info['new_failures'], [])
+
+    def test_changed_jest_duration_does_not_create_new_failure(self):
+        path = self.root / 'tests/test_app.py'
+        output = 'print("  \\u2715 keeps subscription ({duration} ms)")\nraise SystemExit(1)\n'
+        path.write_text(output.format(duration=3), encoding='utf-8')
+        git(['commit', '-qam', 'red base'], self.root)
+        self.set_base()
+        path.write_text(output.format(duration=4), encoding='utf-8')
+        self.snapshot()
+        command = f'"{PY}" -X utf8 tests/test_app.py'
+        rc, gate, info, out = self.run_tool('--tests-cmd', command)
+        self.assertEqual((rc, gate['status']), (1, 'fail'), out)
+        self.assertEqual(info['base_failures'], ['keeps subscription'])
+        self.assertEqual(info['new_failures'], [])
 
     def test_tautological_test_is_green_on_base_and_fails_gate(self):
         self.fix_code()

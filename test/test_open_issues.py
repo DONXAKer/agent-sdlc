@@ -873,5 +873,28 @@ class TerminalEvidenceCheckSeparationTests(unittest.TestCase):
             self.assertIn(fragment, self.sdlc)
 
 
+class PublishedFormContractsTests(unittest.TestCase):
+    def test_closing_actions_default_to_no_and_required_files_to_empty(self):
+        intent = (ROOT / 'templates/intent.template.md').read_text(encoding='utf-8')
+        for field in ('Коммит', 'Публикация', 'Закрытие в трекере'):
+            self.assertEqual(intent.count(f'- **{field}:** нет'), 1)
+        start = '<!-- sdlc-close-files/v1:start -->'
+        end = '<!-- sdlc-close-files/v1:end -->'
+        self.assertEqual(intent.count(start), 1)
+        self.assertEqual(intent.count(end), 1)
+        body = intent.split(start, 1)[1].split(end, 1)[0]
+        self.assertEqual(json.loads(body), [])
+
+    def test_handoff_closing_readiness_defaults_to_not_applicable(self):
+        handoff = (ROOT / 'templates/handoff.template.md').read_text(encoding='utf-8')
+        heading = '## Готовность к закрытию в трекере'
+        self.assertEqual(handoff.count(heading), 1)
+        section = handoff.split(heading, 1)[1].split('\n## ', 1)[0]
+        self.assertIn('- **Применимость:** н/п', section)
+        self.assertIn('- **Готово:** н/п', section)
+        for field in ('HEAD', 'Remote SHA', 'Открытые критерии', 'Блокировки'):
+            self.assertIn(f'- **{field}:**', section)
+
+
 if __name__ == '__main__':
     unittest.main()

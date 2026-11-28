@@ -1,6 +1,6 @@
 # Вердикт флоу: TASK-001 (--at verify)
 
-Пройдено проверок: 46 · Провалено: 19
+Пройдено проверок: 47 · Провалено: 19
 
 ## Провалы и что улучшить во флоу
 
@@ -56,6 +56,7 @@
 - ✅ нет ‹…› в exploration-report.md
 - ✅ нет ‹…› в handoff.md
 - ✅ нет ‹…› в intent.md
+- ✅ нет ‹…› в mandatory-scenarios.md
 - ✅ нет ‹…› в plan-checks-and-gates.md
 - ✅ нет ‹…› в plan.md
 - ✅ нет ‹…› в readiness.md

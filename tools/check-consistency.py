@@ -23,7 +23,9 @@ CLAUDE.md перечисляет сквозные инварианты («одн
  12. словарь вердикта готовности readiness_verdicts согласован в константах, правилах заполнения и коде;
  13. нормативные правила разведки и плана («однократно применяемые артефакты схемы»,
      «имена объектов хранилища», «создаваемый объект») присутствуют в SDLC.md, профилях
-     и скиллах всех реализаций: сверяются тема и запрет, без учёта регистра.
+     и скиллах всех реализаций: сверяются тема и запрет, без учёта регистра;
+ 14. обязательные сценарии составного claim: формы в шаблонах intent/plan/verification-report/handoff,
+     правила в каноне, скиллах всех реализаций и профилях, заполненный пример.
 
 Запуск: python tools/check-consistency.py   (код возврата 1 при расхождении)
 """
@@ -231,6 +233,7 @@ CONSUMERS = {
     "placeholder": lambda: '"placeholder"' in py_text,
     "not_applicable": lambda: '"not_applicable"' in py_text,
     "claim_id_pattern": lambda: '"claim_id_pattern"' in py_text,
+    "scenario_id_pattern": lambda: bool(re.search(C["scenario_id_pattern"], templates_text)) and "`sc-N`" in sdlc,
     "artifacts_dir": lambda: '"artifacts_dir"' in py_text,
     "attempt_default_budget": lambda: '"attempt_default_budget"' in py_text,
     "chunk_size_guideline": lambda: '"chunk_size_guideline"' in py_text,
@@ -353,6 +356,54 @@ for phrase, (predicates, consumers) in RULE_CONSUMERS.items():
         for predicate in predicates:
             if predicate not in text:
                 fail(rel, f"правило «{phrase}» без запрета «{predicate}»")
+
+# --- 14. Обязательные сценарии: формы, канон и скиллы ------------------------------------------
+SCENARIO_FORMS = {
+    "templates/intent.template.md": "## Обязательные сценарии",
+    "templates/plan.template.md": "## Привязка обязательных сценариев",
+    "templates/verification-report.template.md": "### Обязательные сценарии",
+    "templates/handoff.template.md": "Обязательные сценарии — тот же итог, что в отчёте приёмки",
+}
+for rel, marker in SCENARIO_FORMS.items():
+    if marker not in read(rel):
+        fail(rel, f"нет формы обязательных сценариев «{marker}»")
+if "остаётся открытым" not in read("templates/verification-report.template.md"):
+    fail("templates/verification-report.template.md", "нет правила открытого состояния сценария")
+if "Итог сценариев совпадает с отчётом приёмки" not in read("templates/handoff.template.md"):
+    fail("templates/handoff.template.md", "нет сверки единого итога сценариев с отчётом приёмки")
+for phrase in ("один успешный сценарий", "итог обязательных сценариев един"):
+    if phrase not in sdlc.casefold():
+        fail("SDLC.md", f"правило обязательных сценариев «{phrase}» не найдено")
+if not (ROOT / "example" / "mandatory-scenarios.md").is_file():
+    fail("example/mandatory-scenarios.md", "нет заполненного примера обязательных сценариев")
+SCENARIO_SKILL_PREDICATES = {"sdlc-intent": ["составной claim", "разложи"],
+                             "sdlc-plan": ["один успешный сценарий", "не закрывает"],
+                             "sdlc-verify": ["свежему результату на кандидате", "остаётся открытым"],
+                             "sdlc-handoff": ["из отчёта приёмки дословно", "перенеси"]}
+SCENARIO_CONSUMERS = [("SDLC.md", "один успешный сценарий составной claim не закрывает")] + [
+    (f"implementations/{impl.name}/skills/{skill}/SKILL.md", pred)
+    for impl in IMPLEMENTATIONS for skill, pred in SCENARIO_SKILL_PREDICATES.items()] + [
+    ("profiles/guided.md", "привяжи к проверке и ожидаемому результату до одобрения"),
+    ("profiles/preparation-v2.md", "привяжи к проверке и ожидаемому результату до одобрения")]
+for impl in IMPLEMENTATIONS:
+    for reviewer in sorted((impl / "agents").glob("sdlc-reviewer.*")):
+        SCENARIO_CONSUMERS.append((str(reviewer.relative_to(ROOT)), "все его обязательные сценарии из задачи"))
+scenario_form = read("templates/verification-report.template.md").split("### Обязательные сценарии", 1)[1]
+if "‹✅/❌/⚠/manual›" not in scenario_form:
+    fail("templates/verification-report.template.md", "статусы сценария не из словаря пунктов приёмки")
+if "`⏭` здесь не используется" not in scenario_form:
+    fail("templates/verification-report.template.md", "нет запрета ⏭ в таблице сценариев")
+for rel, predicates in SCENARIO_CONSUMERS:
+    if not (ROOT / rel).is_file():
+        fail(rel, "файл потребителя правила обязательных сценариев отсутствует")
+        continue
+    text = read(rel).casefold()
+    if "обязательные сценарии" not in text:
+        fail(rel, "правило «обязательные сценарии» не найдено")
+        continue
+    for predicate in predicates if isinstance(predicates, list) else [predicates]:
+        if predicate not in text:
+            fail(rel, f"правило «обязательные сценарии» без предиката «{predicate}»")
 
 # --- Итог --------------------------------------------------------------------------------------
 if failures:

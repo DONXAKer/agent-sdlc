@@ -1063,6 +1063,82 @@ class FormVersionConsistencyTests(unittest.TestCase):
         self.assertIn('implementations/cursor', result.stdout)
         self.assertIn('выпала из сверки', result.stdout)
 
+    def test_missing_scenario_section_is_red(self):
+        # #129: форма обязательных сценариев удалена из шаблона — гейт обязан покраснеть
+        tpl = self.root / 'templates' / 'intent.template.md'
+        text = tpl.read_text(encoding='utf-8')
+        self.assertIn('## Обязательные сценарии', text)
+        tpl.write_text(text.replace('## Обязательные сценарии', '## Сценарии'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('нет формы обязательных сценариев', result.stdout)
+
+    def test_skill_without_scenario_rule_is_red(self):
+        # #130: правило удалено из скилла verify одной реализации
+        skill = self.root / 'implementations' / 'qwen-code' / 'skills' / 'sdlc-verify' / 'SKILL.md'
+        text = skill.read_text(encoding='utf-8')
+        self.assertIn('обязательные сценарии', text.casefold())
+        skill.write_text(re.sub('обязательные сценарии', 'сценарии приёмки', text, flags=re.I), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('правило «обязательные сценарии» не найдено', result.stdout)
+
+    def test_scenario_rule_without_predicate_is_red(self):
+        # тема сохранена, предикат свежести удалён: гейт сверяет и предикат
+        skill = self.root / 'implementations' / 'codex' / 'skills' / 'sdlc-verify' / 'SKILL.md'
+        text = skill.read_text(encoding='utf-8')
+        self.assertIn('свежему результату', text)
+        skill.write_text(text.replace('свежему результату', 'результату'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('без предиката «свежему результату на кандидате»', result.stdout)
+
+    def test_missing_scenario_example_is_red(self):
+        (self.root / 'example' / 'mandatory-scenarios.md').unlink()
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('example/mandatory-scenarios.md', result.stdout)
+
+    def test_inverted_skill_scenario_rule_is_red(self):
+        # тема и первый предикат сохранены, направление правила вывернуто
+        skill = self.root / 'implementations' / 'codex' / 'skills' / 'sdlc-plan' / 'SKILL.md'
+        text = skill.read_text(encoding='utf-8')
+        self.assertIn('Один успешный сценарий составной claim не закрывает', text)
+        skill.write_text(text.replace('Один успешный сценарий составной claim не закрывает',
+                                      'Один успешный сценарий составной claim закрывает'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('без предиката «не закрывает»', result.stdout)
+
+    def test_inverted_profile_scenario_rule_is_red(self):
+        profile = self.root / 'profiles' / 'guided.md'
+        text = profile.read_text(encoding='utf-8')
+        phrase = 'привяжи к проверке и ожидаемому результату до одобрения'
+        self.assertIn(phrase, text)
+        profile.write_text(text.replace(phrase, 'можно не привязывать к проверке'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('profiles/guided.md', result.stdout)
+
+    def test_inverted_canon_scenario_rule_is_red(self):
+        canon = self.root / 'SDLC.md'
+        text = canon.read_text(encoding='utf-8')
+        phrase = 'один успешный сценарий составной claim не закрывает'
+        self.assertIn(phrase, text)
+        canon.write_text(text.replace(phrase, 'один успешный сценарий составной claim закрывает'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('SDLC.md', result.stdout)
+
+    def test_reviewer_without_scenario_rule_is_red(self):
+        agent = self.root / 'implementations' / 'qwen-code' / 'agents' / 'sdlc-reviewer.md'
+        text = agent.read_text(encoding='utf-8')
+        self.assertIn('все его обязательные сценарии из задачи', text)
+        agent.write_text(text.replace('все его обязательные сценарии из задачи', 'хотя бы один сценарий'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('sdlc-reviewer', result.stdout)
+
 
 class AdoptionSnapshotTests(unittest.TestCase):
     """#126: маркер в живой intent меняет байты шапки — канон требует переснимка секций после adoption."""
@@ -1198,6 +1274,124 @@ class StorageNamesFromEvidenceTests(unittest.TestCase):
                 self.assertIn('files_to_touch', text)
         claude_plan = (ROOT / 'implementations/claude-code/skills/sdlc-plan/SKILL.md').read_text(encoding='utf-8')
         self.assertIn('имена объектов хранилища подтверждены', claude_plan)
+
+
+class MandatoryScenarioTests(unittest.TestCase):
+    """#129 и #130: составной claim раскладывается на обязательные сценарии; итог един для Verify и Handoff."""
+
+    def setUp(self):
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+        self.constants = json.loads((ROOT / 'sdlc-constants.json').read_text(encoding='utf-8'))
+        self.impls = sorted(p.name for p in (ROOT / 'implementations').iterdir() if (p / 'skills').is_dir())
+
+    def test_intent_form_carries_stable_scenario_identity(self):
+        text = (ROOT / 'templates' / 'intent.template.md').read_text(encoding='utf-8')
+        section = text.split('## Обязательные сценарии', 1)[1].split('\n## ', 1)[0]
+        for column in ('| Сценарий |', 'Claim и текст требования', 'Действие', 'Ожидаемый результат'):
+            self.assertIn(column, section)
+        ids = re.findall(r'\bsc-\d+\b', section)
+        self.assertTrue(ids)
+        for sid in ids:
+            self.assertRegex(sid, self.constants['scenario_id_pattern'])
+        self.assertIn('Спорные границы сценариев', section)
+        self.assertIn('«Открытых вопросах» и `clarification-report.md`', section)
+        self.assertIn('[manual]', section)
+
+    def test_scenario_ids_do_not_collide_with_claim_parsers(self):
+        # сценарные строки не должны парситься как claims: иначе дубли ID и ослабленная квота листа
+        tools = ROOT / 'implementations' / 'claude-code' / 'skills' / 'sdlc-verify' / 'tools'
+        sys.path.insert(0, str(tools))
+        try:
+            import scaffold
+            import sdlc_common
+            intent = (ROOT / 'templates' / 'intent.template.md').read_text(encoding='utf-8')
+            intent = intent.replace('claim-1 | ‹наблюдаемое поведение›', 'claim-1 | повтор не списывает баланс')
+            self.assertEqual([cid for cid, _ in scaffold.claims(intent)], ['claim-1'])
+            rows = [ln for ln in intent.splitlines()
+                    if re.match(r'^\|\s*(claim-\d+)\b[^|]*\|', ln)]
+            self.assertEqual(len(rows), 1)
+        finally:
+            sys.path.remove(str(tools))
+
+    def test_plan_form_binds_scenario_to_check_before_approval(self):
+        text = (ROOT / 'templates' / 'plan.template.md').read_text(encoding='utf-8')
+        section = text.split('## Привязка обязательных сценариев', 1)[1].split('\n## ', 1)[0]
+        for column in ('Проверка (команда/тест или ручная процедура, каталог запуска)',
+                       'Ожидаемый результат', 'Согласовано'):
+            self.assertIn(column, section)
+        self.assertIn('до реализации', section)
+        self.assertIn('не согласовано — план не одобряется', section)
+        self.assertIn('[manual]', section)
+
+    def test_verification_form_keeps_unproven_scenario_open(self):
+        text = (ROOT / 'templates' / 'verification-report.template.md').read_text(encoding='utf-8')
+        section = text.split('### Обязательные сценарии', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Свежее свидетельство на кандидате', section)
+        self.assertIn('Чувствительность проверки', section)
+        self.assertIn('остаётся открытым', section)
+        self.assertIn('один успешный сценарий составной claim не закрывает', section.casefold())
+        self.assertIn('Кэш сборщика', section)
+        self.assertIn('‹✅/❌/⚠/manual›', section)
+        self.assertIn('`⏭` здесь не используется', section)
+        self.assertIn('[manual]', section)
+
+    def test_handoff_form_shares_single_outcome_with_verify(self):
+        text = (ROOT / 'templates' / 'handoff.template.md').read_text(encoding='utf-8')
+        self.assertIn('Обязательные сценарии — тот же итог, что в отчёте приёмки', text)
+        self.assertIn('Итог сценариев совпадает с отчётом приёмки', text)
+
+    def test_canon_requires_decomposition_and_single_outcome(self):
+        for fragment in ('`sc-N`', 'до одобрения плана', 'один успешный сценарий',
+                         'Итог обязательных сценариев един', 'свежий результат на кандидате',
+                         'свидетельство чувствительности проверки',
+                         '`⏭` в таблице сценариев не используется'):
+            self.assertIn(fragment, self.sdlc)
+
+    def test_every_implementation_skill_carries_scenario_rule(self):
+        predicates = {'sdlc-intent': 'составной claim', 'sdlc-plan': 'один успешный сценарий',
+                      'sdlc-verify': 'свежему результату на кандидате',
+                      'sdlc-handoff': 'из отчёта приёмки дословно'}
+        self.assertEqual(len(self.impls), 6)
+        for impl in self.impls:
+            for skill, predicate in predicates.items():
+                text = (ROOT / f'implementations/{impl}/skills/{skill}/SKILL.md').read_text(encoding='utf-8').casefold()
+                with self.subTest(impl=impl, skill=skill):
+                    self.assertIn('обязательные сценарии', text)
+                    self.assertIn(predicate, text)
+
+    def test_scenario_rows_do_not_break_claim_gate_and_block_passed(self):
+        # сценарные строки не дают повторных claim-ID, а открытый сценарий блокирует passed=true
+        report = ('## 1. Пункты приёмки\n\n'
+                  '| id | Пункт | passed | Чем подтверждён | Что чинить |\n'
+                  '|---|---|---|---|---|\n'
+                  '| claim-2 | повтор не списывает баланс | ⚠ | нет свежего результата | sc-1 |\n\n'
+                  '### Обязательные сценарии\n\n'
+                  '| Сценарий | Claim | Статус | Свежее свидетельство | Чувствительность | Причина |\n'
+                  '|---|---|---|---|---|---|\n'
+                  '| sc-1 | claim-2 | ⚠ | нет свежего результата | н/п | заблокирован средой |\n'
+                  '| sc-2 | claim-2 | ✅ | запуск текущей ревизии | посев | н/п |\n')
+        self.assertEqual(flow.acceptance_claim_errors(report, ['claim-2']), [])
+        rows = [ln for ln in report.splitlines() if ln.strip().startswith('|')]
+        self.assertTrue([ln for ln in rows if flow.row_glyphs(ln) & set('❌⚠')])
+        self.assertFalse([ln for ln in rows if '⏭' in flow.row_glyphs(ln)])
+
+    def test_example_shows_partial_pass_cache_and_blocked_dependency(self):
+        text = (ROOT / 'example' / 'mandatory-scenarios.md').read_text(encoding='utf-8')
+        for sid in ('sc-1', 'sc-2', 'sc-3'):
+            self.assertIn(sid, text)
+        self.assertIn('FROM-CACHE', text)
+        self.assertIn('заблокирован средой', text)
+        self.assertIn('**passed:** false', text)
+        self.assertIn('**action:** retry', text)
+        self.assertIn('всего 3 · подтверждено 1', text)
+        self.assertIn('Итог сценариев совпадает с отчётом приёмки:** да', text)
+        self.assertIn('составной claim не закрывает', text.casefold())
+        self.assertIn('Участник примера · 2026-07-16', text)
+        for gate in ('Scope: файлы вне плана', 'Анти-обход тест-гейта', 'Ревью независимым агентом'):
+            self.assertIn(gate, text)
+        scenario_rows = [ln for ln in text.splitlines() if re.match(r'^\|\s*sc-\d+\s*\|', ln)]
+        self.assertGreaterEqual(len(scenario_rows), 9)
+        self.assertFalse([ln for ln in scenario_rows if '⏭' in ln])
 
 
 if __name__ == '__main__':

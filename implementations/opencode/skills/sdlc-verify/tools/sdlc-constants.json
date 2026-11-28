@@ -4,6 +4,7 @@
   "placeholder": "‹…›",
   "not_applicable": "н/п",
   "claim_id_pattern": "claim-[0-9]+",
+  "scenario_id_pattern": "sc-[0-9]+",
   "artifacts_dir": ".sdlc",
   "attempt_default_budget": 3,
   "chunk_size_guideline": {

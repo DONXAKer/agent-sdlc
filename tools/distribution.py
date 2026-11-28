@@ -82,7 +82,8 @@ def guide_bytes(root, name, destination, skills, claude=False):
             filename = target.split('/')[1]
             stage = TEMPLATES[filename.split('.')[0]][0] if claude else 'verify'
             target = posixpath.relpath(f'{skills}/sdlc-{stage}/templates/{filename}', posixpath.dirname(destination))
-        elif target in ('example/gates.md', 'profiles/preparation-v2.md', 'example/plan-checks-and-gates.md'):
+        elif target in ('example/gates.md', 'profiles/preparation-v2.md', 'example/plan-checks-and-gates.md',
+                        'example/mandatory-scenarios.md'):
             target = SOURCE_URL + target
         elif target == '../model-runs/guided-history.md':
             target = SOURCE_URL + 'profiles/guided.md#приёмка-профиля'

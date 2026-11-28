@@ -183,7 +183,7 @@
 
 Для допуска требуются финальная приёмка, все скрытые проверки, соблюдение бюджета и отсутствие нарушений честности.
 Учитывай ошибки среды отдельно. До подтверждения порога 80% на каждой модели и проверки на отложенных задачах профиль включается явно.
-Условия измерений и результаты версий описаны в [истории испытаний](https://github.com/DONXAKer/agent-sdlc/blob/6a39fc53124a9fea94c6f728cc71f1bbb16d0eb9/profiles/guided.md#приёмка-профиля).
+Условия измерений и результаты версий описаны в [истории испытаний](https://github.com/DONXAKer/agent-sdlc/blob/7b4439613295d145a0c37a210b62f9bca42f892f/profiles/guided.md#приёмка-профиля).
 
 Основания: [Deming Institute — PDSA](https://deming.org/explore/pdsa/), [Lean Enterprise Institute — poka-yoke](https://www.lean.org/lexicon-terms/poka-yoke/).
 

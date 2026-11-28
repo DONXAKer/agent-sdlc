@@ -37,7 +37,7 @@ TEMPLATES = {
 RESOURCE_RECORD = CODEX / 'generated-resources.json'
 GUIDES = ('SDLC.md', 'process-quality.md', 'implementation-contract.md', 'runtime-verification.md', 'profiles/guided.md')
 # Опубликованные материалы, на которые ссылаются автономные комплекты.
-SOURCE_URL = 'https://github.com/DONXAKer/agent-sdlc/blob/6a39fc53124a9fea94c6f728cc71f1bbb16d0eb9/'
+SOURCE_URL = 'https://github.com/DONXAKer/agent-sdlc/blob/7b4439613295d145a0c37a210b62f9bca42f892f/'
 
 
 def canonical_bytes(path):

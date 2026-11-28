@@ -1099,6 +1099,46 @@ class FormVersionConsistencyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('example/mandatory-scenarios.md', result.stdout)
 
+    def test_profile_without_basis_source_is_red(self):
+        profile = self.root / 'profiles' / 'preparation-v2.md'
+        text = profile.read_text(encoding='utf-8')
+        self.assertIn('Источник basis — маркер', text)
+        profile.write_text(text.replace('Источник basis — маркер `sdlc-json:basis`, а не Markdown-секция.',
+                                        'Источник basis — секция задачи.'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('не назван источник basis', result.stdout)
+
+    def test_profile_without_removed_table_note_is_red(self):
+        profile = self.root / 'profiles' / 'preparation-v2.md'
+        text = profile.read_text(encoding='utf-8')
+        self.assertIn('Таблица «Основания и сценарии» выведена из формы', text)
+        profile.write_text(text.replace('Таблица «Основания и сценарии» выведена из формы при переходе на JSON-маркеры;',
+                                        'Таблица «Основания и сценарии» остаётся в форме;'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('не зафиксирован вывод удалённой таблицы', result.stdout)
+
+    def test_profile_allowing_requirements_wipe_is_red(self):
+        profile = self.root / 'profiles' / 'preparation-v2.md'
+        text = profile.read_text(encoding='utf-8')
+        self.assertIn('затирать требования при пустом результате нельзя', text)
+        profile.write_text(text.replace('затирать требования при пустом результате нельзя',
+                                        'затирать требования при пустом результате допустимо'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('нет запрета затирать требования', result.stdout)
+
+    def test_canon_without_contract_agreement_rule_is_red(self):
+        canon = self.root / 'SDLC.md'
+        text = canon.read_text(encoding='utf-8')
+        self.assertIn('контракт сначала согласовывается с реализацией', text)
+        canon.write_text(text.replace('контракт сначала согласовывается с реализацией',
+                                      'контракт публикуется сразу'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('нет правила согласования машинночитаемого контракта', result.stdout)
+
     def test_inverted_skill_scenario_rule_is_red(self):
         # тема и первый предикат сохранены, направление правила вывернуто
         skill = self.root / 'implementations' / 'codex' / 'skills' / 'sdlc-plan' / 'SKILL.md'
@@ -1392,6 +1432,29 @@ class MandatoryScenarioTests(unittest.TestCase):
         scenario_rows = [ln for ln in text.splitlines() if re.match(r'^\|\s*sc-\d+\s*\|', ln)]
         self.assertGreaterEqual(len(scenario_rows), 9)
         self.assertFalse([ln for ln in scenario_rows if '⏭' in ln])
+
+
+class BasisContractTests(unittest.TestCase):
+    """#131: источник basis — JSON-маркер; подъём машинночитаемого контракта согласуется до публикации."""
+
+    def test_profile_names_marker_as_basis_source(self):
+        text = (ROOT / 'profiles' / 'preparation-v2.md').read_text(encoding='utf-8')
+        self.assertIn('Источник basis — маркер `sdlc-json:basis`', text)
+        self.assertIn('Таблица «Основания и сценарии» выведена из формы', text)
+        self.assertIn('«Источники и утверждение критериев» и «Обязательные сценарии»', text)
+        self.assertIn('затирать требования при пустом результате нельзя', text)
+
+    def test_canon_requires_contract_agreement_before_bump_publication(self):
+        text = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+        self.assertIn('машинночитаемый контракт', text)
+        self.assertIn('контракт сначала согласовывается с реализацией', text)
+        self.assertIn('До согласования опубликованной остаётся прежняя форма', text)
+
+    def test_intent_form_does_not_restore_removed_basis_table(self):
+        text = (ROOT / 'templates' / 'intent.template.md').read_text(encoding='utf-8')
+        self.assertNotIn('Основания и сценарии', text)
+        self.assertIn('## Источники и утверждение критериев', text)
+        self.assertIn('## Обязательные сценарии', text)
 
 
 if __name__ == '__main__':

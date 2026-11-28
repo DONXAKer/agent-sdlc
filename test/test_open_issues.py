@@ -5,8 +5,11 @@ import copy
 import importlib.util
 import io
 import json
+import re
 import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -894,6 +897,307 @@ class PublishedFormContractsTests(unittest.TestCase):
         self.assertIn('- **Готово:** н/п', section)
         for field in ('HEAD', 'Remote SHA', 'Открытые критерии', 'Блокировки'):
             self.assertIn(f'- **{field}:**', section)
+
+
+class FormVersionLiveFlowTests(unittest.TestCase):
+    """#126: подъём версии формы решает судьбу живого витка; перенос и файлы без маркера описаны."""
+
+    def setUp(self):
+        self.claude = (ROOT / 'CLAUDE.md').read_text(encoding='utf-8')
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+
+    def test_both_canons_answer_what_happens_to_live_flow(self):
+        for text in (self.claude, self.sdlc):
+            self.assertIn('судьбу', text)
+            for outcome in ('перенос', 'закрытие', 'дочитывание'):
+                self.assertIn(outcome, text.casefold())
+        self.assertIn('Версия формы и живой виток', self.claude)
+        self.assertIn('## Версия формы и живой виток', self.sdlc)
+        self.assertIn('Без записанного решения подъём версии не публикуется', self.sdlc)
+
+    def test_transfer_procedure_preserves_acceptance_verbatim(self):
+        section = self.sdlc.split('## Версия формы и живой виток', 1)[1].split('\n# ', 1)[0]
+        for fragment in ('все claim-id прежнего артефакта присутствуют в новом',
+                         'формулировки пунктов и решений человека совпадают дословно',
+                         'новых плейсхолдеров',
+                         'старая версия → новая версия',
+                         'Перенос не меняет смысл приёмочного листа',
+                         'Поле решения человека агент за человека не заполняет'):
+            self.assertIn(fragment, section)
+
+    def test_transfer_does_not_carry_plan_edition_approval(self):
+        # перенос формы плана — новая редакция: старую подпись не переноси (правило раскладки)
+        section = self.sdlc.split('## Версия формы и живой виток', 1)[1].split('\n# ', 1)[0]
+        self.assertIn('Поле «Одобрение» плана — одобрение редакции, а не историческое решение', section)
+        self.assertIn('старую подпись не переноси и получи новое одобрение', section)
+        self.assertIn('исторические решения человека в приёмке', section)
+
+    def test_adoption_marks_actual_version_without_content_edit(self):
+        section = self.sdlc.split('### Файлы, заведённые до маркера', 1)[1].split('\n# ', 1)[0]
+        for fragment in ('без правки содержимого',
+                         'только если содержимое соответствует этой форме',
+                         'журнал изменений набора',
+                         'Маркер не меняет таблицу и поля файла'):
+            self.assertIn(fragment, section)
+
+    def test_adoption_requires_human_and_renews_flow_baselines(self):
+        # проставление маркера в живой артефакт меняет байты: канон требует человека и переснимка
+        section = self.sdlc.split('### Файлы, заведённые до маркера', 1)[1].split('\n# ', 1)[0]
+        self.assertIn('Проставление маркера подтверждает человек', section)
+        self.assertIn('новый снимок секций задачи и новое одобрение, привязанное к байтам', section)
+
+
+class FormVersionConsistencyTests(unittest.TestCase):
+    """#126: check-consistency ловит рассинхрон версий форм между эталоном и комплектами."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        for name in ('templates', 'implementations', 'example', 'profiles'):
+            shutil.copytree(ROOT / name, self.root / name,
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        (self.root / 'test').mkdir()
+        shutil.copytree(ROOT / 'test' / 'flow-verdict-corpus', self.root / 'test' / 'flow-verdict-corpus')
+        for name in ('SDLC.md', 'README.md', 'CLAUDE.md', 'process-quality.md',
+                     'implementation-contract.md', 'sdlc-constants.json', 'check.py',
+                     'test/README.md', 'tools/check-consistency.py'):
+            target = self.root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, target)
+
+    def run_check(self):
+        return subprocess.run([sys.executable, str(self.root / 'tools' / 'check-consistency.py')],
+                              cwd=self.root, capture_output=True, text=True,
+                              encoding='utf-8', errors='replace')
+
+    def test_synced_tree_is_green(self):
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_stale_copy_after_canon_bump_is_red(self):
+        canon = self.root / 'templates' / 'intent.template.md'
+        text = canon.read_text(encoding='utf-8')
+        version = int(re.search(r'v(\d+)', text.splitlines()[0]).group(1))
+        canon.write_text(text.replace(f'intent v{version}', f'intent v{version + 1}', 1), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('версия формы', result.stdout)
+        self.assertIn(f'intent v{version + 1}', result.stdout)
+
+    def test_diverged_copy_version_is_red(self):
+        copy = self.root / 'implementations' / 'codex' / 'skills' / 'sdlc-verify' / 'templates' / 'intent.template.md'
+        text = copy.read_text(encoding='utf-8')
+        version = int(re.search(r'v(\d+)', text.splitlines()[0]).group(1))
+        copy.write_text(text.replace(f'intent v{version}', f'intent v{version - 1}', 1), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('версия формы', result.stdout)
+
+    def test_missing_copy_is_red(self):
+        (self.root / 'implementations' / 'kimi-code' / 'skills' / 'sdlc-verify' / 'templates' / 'plan.template.md').unlink()
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('нет копии шаблона «plan»', result.stdout)
+
+    def test_removed_rule_phrase_is_red(self):
+        skill = self.root / 'implementations' / 'qwen-code' / 'skills' / 'sdlc-explore' / 'SKILL.md'
+        text = skill.read_text(encoding='utf-8')
+        m = re.search('однократно применяемые артефакты схемы', text, re.I)
+        self.assertIsNotNone(m)
+        skill.write_text(text[:m.start()] + 'изменённая формулировка' + text[m.end():], encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('правило «однократно применяемые артефакты схемы» не найдено', result.stdout)
+
+    def test_inverted_predicate_with_kept_topic_is_red(self):
+        # тема правила сохранена, запрет вывернут: гейт обязан ловить предикат, а не только тему
+        skill = self.root / 'implementations' / 'qwen-code' / 'skills' / 'sdlc-explore' / 'SKILL.md'
+        text = skill.read_text(encoding='utf-8')
+        self.assertIn('не редактируются', text)
+        skill.write_text(text.replace('не редактируются', 'допускается править'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('без запрета «не редактируются»', result.stdout)
+
+    def test_inverted_storage_ban_is_red(self):
+        # стем «умозрительн» сохранён, запрет заменён разрешением: гейт обязан ловить инверсию
+        skill = self.root / 'implementations' / 'qwen-code' / 'skills' / 'sdlc-plan' / 'SKILL.md'
+        text = skill.read_text(encoding='utf-8')
+        self.assertIn('умозрительные имена запрещены', text)
+        skill.write_text(text.replace('умозрительные имена запрещены', 'умозрительные имена допускаются'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('без запрета «запрещ»', result.stdout)
+
+    def test_profile_without_new_object_exception_is_red(self):
+        profile = self.root / 'profiles' / 'preparation-v2.md'
+        text = profile.read_text(encoding='utf-8')
+        self.assertIn('создаваемый объект объяви новым', text.casefold())
+        profile.write_text(text.replace('создаваемый объект объяви новым', 'создаваемый объект подтверди'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('profiles/preparation-v2.md', result.stdout)
+        self.assertIn('без запрета «объяви новым»', result.stdout)
+
+    def test_profile_without_rule_is_red(self):
+        profile = self.root / 'profiles' / 'guided.md'
+        text = profile.read_text(encoding='utf-8')
+        self.assertIn('Имена объектов хранилища', text)
+        profile.write_text(text.replace('Имена объектов хранилища', 'Имена сущностей БД'), encoding='utf-8')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('profiles/guided.md', result.stdout)
+
+    def test_empty_template_fails_cleanly_without_traceback(self):
+        (self.root / 'templates' / 'intent.template.md').write_bytes(b'')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertIn('первая строка не', result.stdout)
+
+    def test_implementation_without_skills_is_red(self):
+        shutil.rmtree(self.root / 'implementations' / 'cursor' / 'skills')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('implementations/cursor', result.stdout)
+        self.assertIn('выпала из сверки', result.stdout)
+
+
+class AdoptionSnapshotTests(unittest.TestCase):
+    """#126: маркер в живой intent меняет байты шапки — канон требует переснимка секций после adoption."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.d = self.root / '.sdlc' / 'T-1'
+        self.d.mkdir(parents=True)
+        self.tool = ROOT / 'implementations' / 'claude-code' / 'skills' / 'sdlc-verify' / 'tools' / 'intent-sections.py'
+
+    def run_sections(self, mode):
+        return subprocess.run([sys.executable, str(self.tool), mode, str(self.root), 'T-1'],
+                              capture_output=True, text=True, encoding='utf-8', errors='replace')
+
+    def test_marker_only_change_is_illegal_until_resnapshot(self):
+        form = (ROOT / 'templates' / 'intent.template.md').read_text(encoding='utf-8')
+        marker = form.splitlines()[0]
+        legacy = form.replace(marker + '\n', '', 1)  # файл, заведённый до маркера
+        intent = self.d / 'intent.md'
+        intent.write_text(legacy, encoding='utf-8')
+        self.assertEqual(self.run_sections('--snapshot').returncode, 0)
+        # проставление маркера без переснимка ломает законность правок (дефект до исправления канона)
+        intent.write_text(marker + '\n' + legacy, encoding='utf-8')
+        result = self.run_sections('--check')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"legal": false', result.stdout)
+        # предписанный каноном путь: подтверждённый adoption + новый снимок секций
+        self.assertEqual(self.run_sections('--snapshot').returncode, 0)
+        result = self.run_sections('--check')
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('"legal": true', result.stdout)
+
+
+class OneShotSchemaArtifactsTests(unittest.TestCase):
+    """#127: разведка и план предлагают новый файл схемы, а не правку применённого артефакта."""
+
+    def setUp(self):
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+        self.impls = sorted(p.name for p in (ROOT / 'implementations').iterdir() if (p / 'skills').is_dir())
+
+    def test_canon_forbids_editing_applied_artifacts_in_explore_and_plan(self):
+        self.assertIn('Однократно применяемые артефакты схемы — применённые миграции', self.sdlc)
+        self.assertIn('Карта путей плана не противоречит действию шага', self.sdlc)
+        explore_rules = self.sdlc.split('## exploration-report\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('однократно применяемые артефакты схемы', explore_rules.casefold())
+        plan_rules = self.sdlc.split('## plan\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('однократно применяемые артефакты схемы', plan_rules.casefold())
+
+    def test_every_implementation_skill_carries_the_rule(self):
+        self.assertEqual(len(self.impls), 6)
+        for impl in self.impls:
+            for skill in ('sdlc-explore', 'sdlc-plan'):
+                text = (ROOT / f'implementations/{impl}/skills/{skill}/SKILL.md').read_text(encoding='utf-8')
+                with self.subTest(impl=impl, skill=skill):
+                    self.assertIn('однократно применяемые артефакты схемы', text.casefold())
+                    self.assertIn('следующей версии', text)
+                    self.assertIn('не редактируются', text)
+
+
+class StorageNamesFromEvidenceTests(unittest.TestCase):
+    """#128: имена объектов хранилища в контракте шага — только из прочитанных свидетельств."""
+
+    def setUp(self):
+        self.sdlc = (ROOT / 'SDLC.md').read_text(encoding='utf-8')
+        self.impls = sorted(p.name for p in (ROOT / 'implementations').iterdir() if (p / 'skills').is_dir())
+
+    def test_canon_bans_speculative_names_and_checks_them_before_approval(self):
+        self.assertIn('Имена объектов хранилища — таблицы, колонки, связи', self.sdlc)
+        self.assertIn('Умозрительное имя запрещено', self.sdlc)
+        self.assertIn('До одобрения сверь имена объектов хранилища в контрактах', self.sdlc)
+        plan_rules = self.sdlc.split('## plan\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('имена объектов хранилища', plan_rules.casefold())
+        self.assertIn('умозрительные имена запрещены', plan_rules.casefold())
+
+    def test_readiness_run2_checks_storage_names(self):
+        readiness = self.sdlc.split('## readiness\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('Прогон 2 проверяет шесть критериев', readiness)
+        self.assertIn('Имена объектов хранилища, названные в задаче и карте разведки, подтверждены прочитанными свидетельствами с записанным адресом', readiness)
+        example = (ROOT / 'example' / 'readiness.md').read_text(encoding='utf-8')
+        self.assertIn('Имена объектов хранилища подтверждены прочитанными свидетельствами с адресом', example)
+
+    def test_new_object_is_declared_instead_of_banned(self):
+        # #127 предписывает новый файл схемы; #128 не должен блокировать имя создаваемого объекта
+        self.assertIn('Объект, создаваемый задачей, объяви новым', self.sdlc)
+        readiness = self.sdlc.split('## readiness\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('создаваемый объект объявлен новым с адресом создаваемого файла схемы', readiness)
+        self.assertEqual(len(self.impls), 6)
+        consumers = [f'implementations/{impl}/skills/sdlc-plan/SKILL.md' for impl in self.impls]
+        consumers += ['profiles/guided.md', 'profiles/preparation-v2.md']
+        for rel in consumers:
+            text = (ROOT / rel).read_text(encoding='utf-8')
+            with self.subTest(consumer=rel):
+                self.assertIn('создаваемый объект объяви новым', text.casefold())
+        for impl in self.impls:
+            text = (ROOT / f'implementations/{impl}/skills/sdlc-plan/SKILL.md').read_text(encoding='utf-8')
+            with self.subTest(impl=impl):
+                self.assertIn('[new]', text)
+
+    def test_evidence_kinds_agree_between_plan_and_readiness(self):
+        # план допускает код с адресом, критерий готовности не должен требовать только файл схемы
+        readiness = self.sdlc.split('## readiness\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('файлом схемы или кодом', readiness)
+        self.assertIn('поиском по кодовой базе', self.sdlc)
+        consumers = [f'implementations/{impl}/skills/sdlc-plan/SKILL.md' for impl in self.impls]
+        consumers += ['profiles/guided.md', 'profiles/preparation-v2.md']
+        for rel in consumers:
+            text = (ROOT / rel).read_text(encoding='utf-8')
+            with self.subTest(consumer=rel):
+                self.assertIn('файла схемы или кода', text.casefold())
+
+    def test_example_evidence_covers_every_named_storage_object(self):
+        # в задаче названы payments и таблица ключей: свидетельство строки 6 покрывает оба имени
+        example = (ROOT / 'example' / 'readiness.md').read_text(encoding='utf-8')
+        report = (ROOT / 'example' / 'exploration-report.md').read_text(encoding='utf-8')
+        intent = (ROOT / 'example' / 'intent.md').read_text(encoding='utf-8')
+        self.assertIn('payments', intent)
+        run2 = example.split('## Прогон 2', 1)[1]
+        row = next(line for line in run2.splitlines() if line.startswith('| 6 |'))
+        for address in ('src/main/java/com/acme/payments/domain/Payment.java',
+                        'src/main/resources/db/migration/V31__idempotency_keys.sql'):
+            self.assertIn(address, row)
+            self.assertIn(address, report)
+
+    def test_every_plan_skill_carries_the_rule(self):
+        self.assertEqual(len(self.impls), 6)
+        for impl in self.impls:
+            text = (ROOT / f'implementations/{impl}/skills/sdlc-plan/SKILL.md').read_text(encoding='utf-8')
+            with self.subTest(impl=impl):
+                self.assertIn('имена объектов хранилища', text.casefold())
+                self.assertIn('умозрительн', text.casefold())
+                self.assertIn('files_to_touch', text)
+        claude_plan = (ROOT / 'implementations/claude-code/skills/sdlc-plan/SKILL.md').read_text(encoding='utf-8')
+        self.assertIn('имена объектов хранилища подтверждены', claude_plan)
 
 
 if __name__ == '__main__':

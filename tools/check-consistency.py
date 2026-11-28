@@ -19,7 +19,11 @@ CLAUDE.md перечисляет сквозные инварианты («одн
   9. имена файлов реализации (*.py), упомянутые в SDLC.md и шаблонах, существуют в дереве;
  10. test/README.md перечисляет все кейсы корпуса flow-verdict;
  11. каждый шаблон начинается строкой версии формы `<!-- sdlc-template: <имя> vN -->`;
- 12. словарь вердикта готовности readiness_verdicts согласован в константах, правилах заполнения и коде.
+     версия формы одинакова в templates/ и во всех установочных комплектах, копия есть у каждой реализации;
+ 12. словарь вердикта готовности readiness_verdicts согласован в константах, правилах заполнения и коде;
+ 13. нормативные правила разведки и плана («однократно применяемые артефакты схемы»,
+     «имена объектов хранилища», «создаваемый объект») присутствуют в SDLC.md, профилях
+     и скиллах всех реализаций: сверяются тема и запрет, без учёта регистра.
 
 Запуск: python tools/check-consistency.py   (код возврата 1 при расхождении)
 """
@@ -286,12 +290,34 @@ for c in cases:
     if f"`{c}`" not in test_readme:
         fail("test/README.md", f"кейс корпуса «{c}» не перечислен")
 
-# --- 11. Версия формы в каждом шаблоне ----------------------------------------------------------
+# --- 11. Версия формы в каждом шаблоне и во всех установочных комплектах -------------------------
+def form_marker(path):
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return None
+    m = re.fullmatch(r"<!-- sdlc-template: ([\w-]+) v(\d+) -->", lines[0])
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+EXPECTED_IMPLEMENTATIONS = {"claude-code", "codex", "cursor", "kimi-code", "opencode", "qwen-code"}
+IMPLEMENTATIONS = sorted(p for p in (ROOT / "implementations").iterdir() if (p / "skills").is_dir())
+for name in sorted(EXPECTED_IMPLEMENTATIONS - {p.name for p in IMPLEMENTATIONS}):
+    fail(f"implementations/{name}", "реализация без каталога skills/ выпала из сверки версий форм и правил")
 for p in (ROOT / "templates").glob("*.template.md"):
-    first = p.read_text(encoding="utf-8").splitlines()[0]
     name = p.name.replace(".template.md", "")
-    if not re.fullmatch(rf"<!-- sdlc-template: {re.escape(name)} v\d+ -->", first):
+    marker = form_marker(p)
+    if marker is None or marker[0] != name:
         fail(str(p.relative_to(ROOT)), f"первая строка не «<!-- sdlc-template: {name} vN -->»")
+        continue
+    for impl in IMPLEMENTATIONS:
+        copies = sorted(impl.glob(f"skills/*/templates/{p.name}"))
+        if not copies:
+            fail(str(impl.relative_to(ROOT)), f"нет копии шаблона «{name}»")
+        for copy in copies:
+            copy_marker = form_marker(copy)
+            if copy_marker != marker:
+                got = f"{copy_marker[0]} v{copy_marker[1]}" if copy_marker else "без маркера"
+                fail(str(copy.relative_to(ROOT)), f"версия формы «{got}» ↔ эталон «{name} v{marker[1]}»")
 
 # --- 12. Словарь вердикта готовности ------------------------------------------------------------
 rv = C["readiness_verdicts"]
@@ -304,6 +330,29 @@ if "Вердикт — ровно" not in ready_rules:
 master_common = read("implementations/claude-code/skills/sdlc-verify/tools/sdlc_common.py")
 if '"readiness_verdicts"' not in master_common:
     fail("sdlc_common.py", "readiness_ok не читает словарь readiness_verdicts из констант")
+
+# --- 13. Нормативные правила разведки и плана во всех реализациях --------------------------------
+# Тема без запрета пропускает переформулированный или вывернутый предикат, поэтому сверяются оба.
+RULE_CONSUMERS = {
+    "однократно применяемые артефакты схемы": (["не редактируются"], ["SDLC.md", "profiles/guided.md", "profiles/preparation-v2.md"] + [
+        f"implementations/{impl.name}/skills/{skill}/SKILL.md"
+        for impl in IMPLEMENTATIONS for skill in ("sdlc-explore", "sdlc-plan")]),
+    "имена объектов хранилища": (["умозрительн", "запрещ"], ["SDLC.md", "profiles/guided.md", "profiles/preparation-v2.md"] + [
+        f"implementations/{impl.name}/skills/sdlc-plan/SKILL.md" for impl in IMPLEMENTATIONS]),
+    "создаваемый объект": (["объяви новым"], ["SDLC.md", "profiles/guided.md", "profiles/preparation-v2.md"] + [
+        f"implementations/{impl.name}/skills/sdlc-plan/SKILL.md" for impl in IMPLEMENTATIONS]),
+}
+for phrase, (predicates, consumers) in RULE_CONSUMERS.items():
+    for rel in consumers:
+        if not (ROOT / rel).is_file():
+            fail(rel, "файл потребителя правила отсутствует")
+            continue
+        text = read(rel).casefold()
+        if phrase not in text:
+            fail(rel, f"правило «{phrase}» не найдено")
+        for predicate in predicates:
+            if predicate not in text:
+                fail(rel, f"правило «{phrase}» без запрета «{predicate}»")
 
 # --- Итог --------------------------------------------------------------------------------------
 if failures:

@@ -55,7 +55,7 @@ _Ничего подходящего не найдено: нет_ — искал
 | Ресурсы и скорость | `src/main/resources/db/migration/V31__idempotency_keys.sql` — уникальный индекс `(endpoint, key)` | чтение и запись ключа идут по индексу; отдельного механизма ограничения скорости в проекте нет |
 | Отказы зависимостей | `src/main/java/com/acme/common/idempotency/IdempotencyGuard.java:execute` — своя транзакционная граница | отказ БД обрабатывается той же транзакцией, что и создание платежа; внешних зависимостей идемпотентность не добавляет |
 | Настройки | `src/main/resources/application.yml:acme.idempotency` — TTL ключа и размер таблицы, общие для всех endpoint'ов | новых ключей конфигурации не требуется, значения общие с заказами |
-| Совместимость и данные | `src/main/java/com/acme/payments/web/PaymentController.java` + контракт OpenAPI `api/payments.yaml` | коды ответа объявлены в контракте — изменение `201 → 200` на повторе обязано пройти через него |
+| Совместимость и данные | `src/main/java/com/acme/payments/web/PaymentController.java` + контракт OpenAPI `api/payments.yaml`; схема — `src/main/java/com/acme/payments/domain/Payment.java` (`@Table(name = "payments")`) | коды ответа объявлены в контракте — изменение `201 → 200` на повторе обязано пройти через него; имя таблицы `payments` прочитано в сущности, новых объектов хранилища задача не вводит |
 | Наблюдаемость | `src/main/java/com/acme/support/RequestLoggingFilter.java` — лог запроса и кода ответа | в логе виден код ответа, но не признак повтора: `isReplay()` наружу не выходит, метрики идемпотентности в проекте нет |
 
 ## Приёмочный лист, выведенный независимо
